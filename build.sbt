@@ -3,6 +3,8 @@ enablePlugins(JavaAppPackaging)
 
 scalaVersion := "2.11.8"
 
+version := "0.0.1"
+
 mainClass in Compile := Some("dynamite.Repl")
 
 libraryDependencies ++= Seq(
@@ -30,4 +32,10 @@ testOptions in Test += Tests.Setup(() =>
 dynamoDBLocalDownloadDir := baseDirectory.value / "dynamodb-local"
 
 SbtScalariform.scalariformSettings 
+
+GithubRelease.repo := "joprice/dynamite" 
+
+//GithubRelease.draft := true
+
+GithubRelease.releaseAssets := Seq((packageBin in Universal).value)
 
