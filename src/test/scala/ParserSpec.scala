@@ -10,6 +10,11 @@ class ParserSpec extends FlatSpec with Matchers {
     result should be(Select(All, "collection"))
   }
 
+  "parser" should "allow dashes in ident" in {
+    val result = Parser("select * from collection-legacy").get.value
+    result should be(Select(All, "collection-legacy"))
+  }
+
   "parser" should "parse a single field" in {
     val result = Parser("select id from collection").get.value
     result should be(Select(Fields(Seq("id")), "collection"))

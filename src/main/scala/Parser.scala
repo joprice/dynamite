@@ -15,7 +15,7 @@ object Parser {
   def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
 
   //TODO: support hyphens in fields?
-  val ident = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9').rep.!)
+  val ident = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')).rep.!)
 
   val fields = P(ident.rep(1, sep = "," ~ space.rep))
 
