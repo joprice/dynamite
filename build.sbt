@@ -3,7 +3,7 @@ enablePlugins(JavaAppPackaging)
 
 scalaVersion := "2.11.8"
 
-version := "0.0.1"
+version := "0.0.2"
 
 mainClass in Compile := Some("dynamite.Repl")
 
@@ -13,7 +13,8 @@ libraryDependencies ++= Seq(
   "org.scalatest" %% "scalatest" % "2.2.6" % Test,
   "com.typesafe.play" %% "play-json" % "2.5.3",
   "jline" % "jline" % "2.14.2",
-  "com.lihaoyi" %% "fansi" % "0.1.3"
+  "com.lihaoyi" %% "fansi" % "0.1.3",
+  "org.rogach" %% "scallop" % "1.0.1"
 )
 
 dynamoDBLocalVersion := "2016-03-01"

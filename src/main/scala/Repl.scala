@@ -13,66 +13,70 @@ import dynamite.Ast.All
 import fansi._
 import play.api.libs.json.{ JsObject, JsValue, Json }
 import scala.util.{ Failure, Success, Try }
+import org.rogach.scallop._
+
+class Conf(args: Seq[String]) extends ScallopConf(args) {
+  val endpoint = opt[String]("endpoint", descr = "aws endpoint")
+  verify()
+}
 
 object Repl {
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
   //TODO: parse port to int
-  def dynamoClient(port: String) = {
+  def dynamoClient(endpoint: Option[String]) = {
     val config = new ClientConfiguration()
       .withConnectionTimeout(1.second.toMillis.toInt)
       .withSocketTimeout(1.second.toMillis.toInt)
-    new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
-      .withEndpoint[AmazonDynamoDBClient](s"http://localhost:$port")
+    endpoint.fold(new AmazonDynamoDBClient()) { endpoint =>
+      new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
+        .withEndpoint[AmazonDynamoDBClient](endpoint)
+    }
   }
 
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
   def main(args: Array[String]): Unit = {
-    if (args.length == 1) {
-      val port = args.head
-      val client = dynamoClient(port)
+    val conf = new Conf(args)
+    val endpoint = conf.endpoint.get
+    val client = dynamoClient(endpoint)
 
-      // temporary solution for creating data during interacitve repl testing
-      Seed(client)
+    // temporary solution for creating data during interacitve repl testing
+    Seed(client)
 
-      val reader = new ConsoleReader()
+    val reader = new ConsoleReader()
 
-      val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
-      reader.setHistory(history)
-      resetPrompt(reader)
-      reader.setExpandEvents(false)
-      //reader.setHandleUserInterrupt(true)
+    val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
+    reader.setHistory(history)
+    resetPrompt(reader)
+    reader.setExpandEvents(false)
+    //reader.setHandleUserInterrupt(true)
 
-      //TODO: autocompletion
+    //TODO: autocompletion
 
-      //      val arg = new ArgumentCompleter(new StringsCompleter("select"), new StringsCompleter("from"), new NullCompleter())
-      //      arg.setStrict(false)
-      //      val completer = new AggregateCompleter(
-      //        arg
-      //        //new ArgumentCompleter(new StringsCompleter("select"), new NullCompleter()),
-      //      )
-      //      reader.addCompleter(completer)
-      //      reader.addCompleter(
-      //        new StringsCompleter("where")
-      //      )
+    //      val arg = new ArgumentCompleter(new StringsCompleter("select"), new StringsCompleter("from"), new NullCompleter())
+    //      arg.setStrict(false)
+    //      val completer = new AggregateCompleter(
+    //        arg
+    //        //new ArgumentCompleter(new StringsCompleter("select"), new NullCompleter()),
+    //      )
+    //      reader.addCompleter(completer)
+    //      reader.addCompleter(
+    //        new StringsCompleter("where")
+    //      )
 
-      //      val handler = new CandidateListCompletionHandler()
-      //      reader.setCompletionHandler(handler)
+    //      val handler = new CandidateListCompletionHandler()
+    //      reader.setCompletionHandler(handler)
 
-      val out = new PrintWriter(reader.getOutput)
-      val eval = Eval(client)
+    val out = new PrintWriter(reader.getOutput)
+    val eval = Eval(client)
 
-      loop(eval, reader, out)
+    loop(eval, reader, out)
 
-      history.flush()
-      reader.shutdown()
-    } else {
-      System.err.println("Dynamo port required")
-      sys.exit(1)
-    }
+    history.flush()
+    reader.shutdown()
   }
 
   def loop(eval: Eval, reader: ConsoleReader, out: PrintWriter) = {
