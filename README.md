@@ -1,0 +1,2 @@
+# dynamite
+Dynamo query REPL
