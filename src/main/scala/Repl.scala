@@ -65,23 +65,6 @@ object Repl {
     reader.setHistory(history)
     resetPrompt(reader)
     reader.setExpandEvents(false)
-    //reader.setHandleUserInterrupt(true)
-
-    //TODO: autocompletion
-
-    //      val arg = new ArgumentCompleter(new StringsCompleter("select"), new StringsCompleter("from"), new NullCompleter())
-    //      arg.setStrict(false)
-    //      val completer = new AggregateCompleter(
-    //        arg
-    //        //new ArgumentCompleter(new StringsCompleter("select"), new NullCompleter()),
-    //      )
-    //      reader.addCompleter(completer)
-    //      reader.addCompleter(
-    //        new StringsCompleter("where")
-    //      )
-
-    //      val handler = new CandidateListCompletionHandler()
-    //      reader.setCompletionHandler(handler)
 
     val out = new PrintWriter(reader.getOutput)
 
@@ -95,7 +78,6 @@ object Repl {
     }
 
     val client = new Lazy({
-      println("Connecting to Dynamo...")
       dynamoClient(opts.endpoint)
     })
     lazy val eval = Eval(client())
@@ -232,7 +214,6 @@ object Repl {
     var line: String = null
 
     while ({ line = nextChar; line != null }) {
-      reader.setEchoCharacter(0.toChar)
       val trimmed = line.trim
       if (inPager) {
         // q is used to quit pagination
