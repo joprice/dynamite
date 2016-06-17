@@ -56,7 +56,7 @@ class EvalSpec
 
   def validate(query: String, expected: List[List[JsValue]]) = {
     val result = runQuery(query)
-    result.toList.map(_.get.map(Json.parse)) should be(expected)
+    result.toList.map(_.get.map(item => Json.parse(item.toJSON))) should be(expected)
   }
 
   "eval" should "select all records from dynamo" in {

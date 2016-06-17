@@ -11,7 +11,7 @@ libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "0.3.7",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.10.73",
   "org.scalatest" %% "scalatest" % "2.2.6" % Test,
-  "com.typesafe.play" %% "play-json" % "2.5.3",
+  "com.typesafe.play" %% "play-json" % "2.5.3" % Test,
   "jline" % "jline" % "2.14.2",
   "com.lihaoyi" %% "fansi" % "0.1.3",
   "org.rogach" %% "scallop" % "1.0.1"

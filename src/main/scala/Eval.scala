@@ -17,7 +17,8 @@ object Eval {
 }
 
 sealed abstract class Response
-final case class ResultSet(results: Iterator[Try[List[String]]]) extends Response
+final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
+final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
 case object Complete extends Response
 
 class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
@@ -31,9 +32,9 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     case ShowTables => showTables()
   }
 
-  def showTables(): Try[ResultSet] = Try {
+  def showTables(): Try[TableNames] = Try {
     val it = dynamo.listTables().pages().iterator()
-    ResultSet(new RecoveringIterator(it).map {
+    TableNames(new RecoveringIterator(it).map {
       _.map(_.asScala.toList.map(_.getTableName))
     })
   }
@@ -119,12 +120,11 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   class TableIterator[A](
       select: Select,
       original: JIterator[Page[Item, A]]
-  ) extends Iterator[Try[List[String]]] {
+  ) extends Iterator[Try[List[Item]]] {
     private[this] val recovering = new RecoveringIterator(original)
-    private[this] var failed = false
 
     def next() = {
-      val result = recovering.next().map(_.asScala.toList.map(_.toJSON))
+      val result = recovering.next().map(_.asScala.toList)
       handleFailure(select.from, result)
     }
 
@@ -164,7 +164,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
           unwrap(sortValue)
         )
         val result = table.getItem(withFields)
-        Iterator(Success(Option(result).map(_.toJSON).toList))
+        Iterator(Success(Option(result).toList))
 
       case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
         val spec = new QuerySpec()

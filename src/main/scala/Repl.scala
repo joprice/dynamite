@@ -1,10 +1,10 @@
 package dynamite
 
 import java.io.{ File, PrintWriter }
-
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
+import com.amazonaws.services.dynamodbv2.document.Item
 import fastparse.core.Parsed
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
@@ -13,8 +13,6 @@ import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import dynamite.Ast.{ All, ShowTables }
 import fansi._
-import play.api.libs.json.{ JsObject, JsValue, Json }
-
 import scala.util.{ Failure, Success, Try }
 import org.rogach.scallop._
 
@@ -22,6 +20,17 @@ class Conf(args: Seq[String]) extends ScallopConf(args) {
   val endpoint = opt[String]("endpoint", descr = "aws endpoint")
   verify()
 }
+
+sealed trait Paging[A] {
+  def pageData: Iterator[Try[List[A]]]
+}
+
+final class TablePaging(
+  val select: Ast.Select,
+  val pageData: Iterator[Try[List[Item]]]
+) extends Paging[Item]
+
+final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging[String]
 
 object Repl {
 
@@ -103,20 +112,9 @@ object Repl {
       }
     }
 
-    var paging: Paging = null
+    var paging: Paging[_] = null
 
     def inPager = paging != null
-
-    sealed trait Paging {
-      def pageData: Iterator[Try[List[String]]]
-    }
-
-    final class TablePaging(
-      val select: Ast.Select,
-      val pageData: Iterator[Try[List[String]]]
-    ) extends Paging
-
-    final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging
 
     def resetPagination() = {
       paging = null
@@ -128,25 +126,34 @@ object Repl {
       if (paging.pageData.hasNext) {
         reader.setPrompt("")
         reader.setEchoCharacter(new Character(0))
-        paging.pageData.next match {
-          case Success(values) =>
-            //TODO: if results is less than page size, finish early?
-            if (values.nonEmpty) {
-              paging match {
-                case paging: TablePaging =>
-                  render(values, paging.select.projection)
-                case paging: TableNamePaging =>
-                  val headers = Seq(Bold.On(Str("name")))
-                  //TODO: move headers into table
-                  Table(out, headers +: values.map(name => Seq(Str(name))))
+
+        def handle[A, B](paging: Paging[A])(process: List[A] => B) = {
+          paging.pageData.next match {
+            case Success(values) =>
+              //TODO: if results is less than page size, finish early?
+              if (values.nonEmpty) {
+                process(values)
               }
-            }
-            if (!paging.pageData.hasNext) {
+              if (!paging.pageData.hasNext) {
+                resetPagination()
+              }
+            case Failure(ex) =>
               resetPagination()
+              reportError(ex.getMessage)
+          }
+        }
+
+        paging match {
+          case paging: TablePaging =>
+            handle(paging) { values =>
+              render(values, paging.select.projection)
             }
-          case Failure(ex) =>
-            resetPagination()
-            reportError(ex.getMessage)
+          case paging: TableNamePaging =>
+            handle(paging) { values =>
+              val headers = Seq(Bold.On(Str("name")))
+              //TODO: move headers into table
+              Table(out, headers +: values.map(name => Seq(Str(name))))
+            }
         }
       }
     }
@@ -159,7 +166,7 @@ object Repl {
         nextPage()
       case (update: Ast.Update, Complete) =>
       //TODO: output for update / delete /ddl
-      case (ShowTables, ResultSet(resultSet)) =>
+      case (ShowTables, TableNames(resultSet)) =>
         paging = new TableNamePaging(resultSet)
         nextPage()
       case unhandled =>
@@ -167,18 +174,21 @@ object Repl {
     }
 
     //TODO: when projecting all fields, show hash/sort keys first?
-    def render(list: Seq[String], select: Ast.Projection) = {
+    def render(list: Seq[Item], select: Ast.Projection) = {
       val headers = select match {
         case All =>
-          list.headOption.map(Json.parse(_).as[JsObject].keys)
+          list.headOption.fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq).sorted
+        /*list.headOption.map(Json.parse(_).as[JsObject].keys)
             .fold(Seq.empty[String])(_.toSeq).sorted
+            */
         case Ast.Fields(fields) => fields
       }
       //TODO: not all fields need the same names. If All was provided in the query,
       // alphas sort by fields present in all objects, followed by the sparse ones?
       //TODO: match order provided if not star
       val body = list.map { item =>
-        val data = Json.parse(item).as[Map[String, JsValue]]
+        val data = item.asMap.asScala
+        //val data = Json.parse(item).as[Map[String, JsValue]]
         // missing fields are represented by an empty str
         headers.map {
           header => Str(data.get(header).map(_.toString).getOrElse(""))
@@ -187,16 +197,19 @@ object Repl {
       Table(out, headers.map(header => Bold.On(Str(header))) +: body)
     }
 
-    var line: String = null
-
     // While paging, a single char is read so that a new line is not required to
     // go the next page, or quit the pager
     def nextChar = if (inPager) {
       reader.readCharacter().toChar.toString
     } else reader.readLine()
 
+    //TODO: rewrite using tailrec?
+    var line: String = null
+
     while ({ line = nextChar; line != null }) {
+      reader.setEchoCharacter(0.toChar)
       val trimmed = line.trim
+      println(s"got $trimmed")
       if (inPager) {
         // q is used to quit pagination
         if (trimmed == "q")
