@@ -115,4 +115,14 @@ class EvalSpec
       ))
     )
   }
+
+  it should "support deleting a record" in {
+    val newName = "Chill Timez"
+    runUpdate(
+      s"delete from playlists where userId = 'user-id-1' and id = 1"
+    )
+    validate(
+      "select name from playlists where userId = 'user-id-1' and id = 1", List(List())
+    )
+  }
 }

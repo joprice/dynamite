@@ -21,6 +21,11 @@ object Ast {
     key: PrimaryKey
   ) extends Query
 
+  final case class Delete(
+    table: String,
+    key: PrimaryKey
+  ) extends Query
+
   sealed abstract class Direction extends Product with Serializable
   case object Ascending extends Direction
   case object Descending extends Direction

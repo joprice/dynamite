@@ -2,7 +2,7 @@ package dynamite
 
 import dynamite.Ast._
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.amazonaws.services.dynamodbv2.document._
+import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
 import com.amazonaws.services.dynamodbv2.document.spec.{ GetItemSpec, QuerySpec, ScanSpec, UpdateItemSpec }
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
 import java.util.{ Iterator => JIterator }
@@ -18,17 +18,36 @@ sealed abstract class Response
 final case class ResultSet(results: Iterator[Try[List[String]]]) extends Response
 case object Complete extends Response
 
-class Eval(client: AmazonDynamoDB, defaultLimit: Int = 20) {
+class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
     case select: Select => runSelect(select)
     case update: Update => runUpdate(update)
+    case delete: Delete => runDelete(delete)
   }
+
+  //TODO: condition expression that item must exist?
+  def runDelete(delete: Delete): Try[Complete.type] = Try {
+    table(delete.table).deleteItem(toDynamoKey(delete.key))
+    Complete
+    //TODO: optionally return consumed capacity
+    //.getConsumedCapacity
+  }
+
+  private def table(tableName: String) = dynamo.getTable(tableName)
 
   private def unwrap(value: Value) = value match {
     case StringValue(value) => value
     case IntValue(value) => value
+  }
+
+  def toDynamoKey(key: Ast.PrimaryKey) = {
+    val Ast.PrimaryKey(hash, range) = key
+    def toAttr(key: Ast.Key) = new KeyAttribute(key.field, unwrap(key.value))
+    val attrs = toAttr(key.hash) +: range.map(toAttr).toSeq
+    new DynamoPrimaryKey(attrs: _*)
+
   }
 
   //TODO: change response to more informative type
@@ -96,6 +115,8 @@ class Eval(client: AmazonDynamoDB, defaultLimit: Int = 20) {
 
     //TODO: what to do when field does not exist on object?
     val table = dynamo.getTable(select.from)
+
+    //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
     val result = select.where match {
       case Some(
         Ast.PrimaryKey(Ast.Key(hashKey, hashValue),
@@ -112,29 +133,34 @@ class Eval(client: AmazonDynamoDB, defaultLimit: Int = 20) {
           unwrap(sortValue)
         )
         val result = table.getItem(withFields)
-        Iterator(Success(List(result.toJSON)))
+        Iterator(Success(Option(result).map(_.toJSON).toList))
 
       case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
         val spec = new QuerySpec()
-        val withFields = (select.projection match {
+        val withFields = select.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
-        })
+        }
+        val withLimit = select.limit.fold(withFields) {
+          limit => withFields.withMaxResultSize(limit)
+        }
           .withHashKey(key, unwrap(value))
-          .withMaxPageSize(select.limit.getOrElse(defaultLimit))
-          //true - asc, false - decs
+          .withMaxPageSize(pageSize)
           .withScanIndexForward(scanForward(select.direction))
-        render(table.query(withFields))
+        render(table.query(withLimit))
 
       case None =>
         //TODO: scan doesn't support order (because doesn't on hash key?)
         val spec = new ScanSpec()
-        val withFields = (select.projection match {
+        val withFields = select.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
-        })
-          .withMaxPageSize(select.limit.getOrElse(defaultLimit))
-        render(table.scan(withFields))
+        }
+        val withLimit = select.limit.fold(withFields) {
+          limit => withFields.withMaxResultSize(limit)
+        }
+          .withMaxPageSize(pageSize)
+        render(table.scan(withLimit))
     }
 
     ResultSet(result)

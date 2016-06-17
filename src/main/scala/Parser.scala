@@ -28,35 +28,25 @@ object Parser {
 
   val string = P(str('"') | str('\''))
 
-  val value = P(string.map(StringValue(_)) | integer.map(IntValue(_)))
-
-  val setField = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
-
-  //  val where = P("where" ~/ spaces ~ setField)
-  //    .map((Where.apply _).tupled)
-
   val integer = {
     val num = P(CharIn('0' to '9'))
     val nonZeroNum = P(CharIn('1' to '9'))
     P(nonZeroNum ~ num.rep | "0").!.map(_.toInt)
   }
 
+  val value = P(string.map(StringValue(_)) | integer.map(IntValue(_)))
+
+  val setField = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
+
   //TODO: fail parse on invalid numbers?
   val limit = {
     "limit" ~/ spaces ~ integer
   }
 
-  val direction: Parser[Direction] =
+  val direction: Parser[Direction] = P(
     P("asc").map(_ => Ascending) |
       P("desc").map(_ => Descending)
-
-  val query = P(
-    select ~ spaces ~
-      from ~
-      opt(primaryKey) ~
-      opt(direction) ~
-      opt(limit)
-  ).map((Select.apply _).tupled)
+  )
 
   val key = P(setField.map((Key.apply _).tupled))
 
@@ -68,16 +58,26 @@ object Parser {
         PrimaryKey(hash, sortKey)
     }
 
+  val query = P(
+    select ~ spaces ~
+      from ~
+      opt(primaryKey) ~
+      opt(direction) ~
+      opt(limit)
+  ).map((Select.apply _).tupled)
+
   val update = P(
     "update" ~/ spaces ~ ident ~ spaces ~
       "set" ~ spaces ~ setField.rep(1, sep = "," ~/ spaces) ~ spaces ~
       primaryKey
-  /*where.map {
-        case Where(key, value) => PrimaryKey(Key(key, value), None)
-      }*/
   )
     .map((Update.apply _).tupled)
 
-  def apply(input: String): Parsed[Query] = ((update | query) ~ spaces.? ~ End).parse(input)
+  val delete = P("delete" ~/ spaces ~ from ~ spaces ~ primaryKey)
+    .map((Delete.apply _).tupled)
+
+  def apply(input: String): Parsed[Query] = (
+    (update | query | delete) ~ spaces.? ~ End
+  ).parse(input)
 
 }
