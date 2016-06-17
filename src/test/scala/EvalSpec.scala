@@ -125,4 +125,16 @@ class EvalSpec
       "select name from playlists where userId = 'user-id-1' and id = 1", List(List())
     )
   }
+
+  it should "support inserting a record" in {
+    val newName = "Throwback Thursday"
+    runUpdate(
+      s"""insert into playlists (userId, id, name) values ('user-id-1', 20, "$newName")"""
+    )
+    validate(
+      "select name from playlists where userId = 'user-id-1' and id = 20", List(List(
+        Json.obj("name" -> newName)
+      ))
+    )
+  }
 }

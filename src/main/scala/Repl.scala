@@ -43,9 +43,6 @@ object Repl {
     val endpoint = conf.endpoint.get
     val client = dynamoClient(endpoint)
 
-    // temporary solution for creating data during interacitve repl testing
-    Seed(client)
-
     val reader = new ConsoleReader()
 
     val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))

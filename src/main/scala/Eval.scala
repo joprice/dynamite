@@ -3,7 +3,7 @@ package dynamite
 import dynamite.Ast._
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
-import com.amazonaws.services.dynamodbv2.document.spec.{ GetItemSpec, QuerySpec, ScanSpec, UpdateItemSpec }
+import com.amazonaws.services.dynamodbv2.document.spec._
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
 import java.util.{ Iterator => JIterator }
 
@@ -25,6 +25,16 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     case select: Select => runSelect(select)
     case update: Update => runUpdate(update)
     case delete: Delete => runDelete(delete)
+    case insert: Insert => runInsert(insert)
+  }
+
+  def runInsert(insert: Insert): Try[Complete.type] = Try {
+    table(insert.table).putItem(
+      insert.values.foldLeft(new Item()) {
+        case (item, Key(field, value)) => item.`with`(field, unwrap(value))
+      }
+    )
+    Complete
   }
 
   //TODO: condition expression that item must exist?

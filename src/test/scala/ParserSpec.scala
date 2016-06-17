@@ -163,5 +163,18 @@ class ParserSpec extends FlatSpec with Matchers {
       )
     )
   }
+
+  it should "allow an item to be inserted" in {
+    validate(
+      "insert into playlists (userId, id) values ('user-id-1', 1)",
+      Insert(
+        "playlists",
+        Seq(
+          Key("userId", StringValue("user-id-1")),
+          Key("id", IntValue(1))
+        )
+      )
+    )
+  }
 }
 

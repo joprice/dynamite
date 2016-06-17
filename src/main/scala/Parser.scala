@@ -19,10 +19,6 @@ object Parser {
 
   val fields = P(ident.rep(1, sep = "," ~ space.rep))
 
-  val select = P("select" ~/ spaces ~ ("*".!.map(_ => All) | fields.map(Fields(_))))
-
-  val from = P("from" ~ spaces ~ ident)
-
   def str(delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
 
@@ -58,8 +54,14 @@ object Parser {
         PrimaryKey(hash, sortKey)
     }
 
-  val query = P(
-    select ~ spaces ~
+  val from = P("from" ~ spaces ~ ident)
+
+  val projection = P(
+    "select" ~/ spaces ~ ("*".!.map(_ => All) | fields.map(Fields(_)))
+  )
+
+  val select = P(
+    projection ~ spaces ~
       from ~
       opt(primaryKey) ~
       opt(direction) ~
@@ -76,8 +78,21 @@ object Parser {
   val delete = P("delete" ~/ spaces ~ from ~ spaces ~ primaryKey)
     .map((Delete.apply _).tupled)
 
-  def apply(input: String): Parsed[Query] = (
-    (update | query | delete) ~ spaces.? ~ End
-  ).parse(input)
+  val insert = P(
+    "insert" ~/ spaces ~
+      "into" ~ spaces ~ ident ~ spaces ~
+      "(" ~/ space.rep ~ ident.rep(1, sep = "," ~/ space.rep) ~ space.rep ~ ")" ~ spaces ~
+      "values" ~ spaces ~ "(" ~ space.rep ~ value.rep(1, sep = "," ~/ space.rep) ~ ")"
+  ).map {
+      case (table, keys, values) =>
+        val pairs = keys.zip(values).map((Key.apply _).tupled)
+        Insert(table, pairs)
+    }
+
+  val query = P((
+    update | select | delete | insert
+  ) ~ spaces.? ~ End)
+
+  def apply(input: String): Parsed[Query] = query.parse(input)
 
 }
