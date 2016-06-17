@@ -75,4 +75,3 @@ dynamite --format=json < query.dql
 dynamite --format=json-pretty < query.dql 
 ```
 
-
