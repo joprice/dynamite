@@ -14,25 +14,28 @@ import scala.collection.JavaConverters._
 import dynamite.Ast.{ All, ShowTables }
 import fansi._
 import scala.util.{ Failure, Success, Try }
-import org.rogach.scallop._
-
-class Conf(args: Seq[String]) extends ScallopConf(args) {
-  val endpoint = opt[String]("endpoint", descr = "aws endpoint")
-  verify()
-}
-
-sealed trait Paging[A] {
-  def pageData: Iterator[Try[List[A]]]
-}
-
-final class TablePaging(
-  val select: Ast.Select,
-  val pageData: Iterator[Try[List[Item]]]
-) extends Paging[Item]
-
-final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging[String]
 
 object Repl {
+
+  def main(args: Array[String]): Unit = {
+    parser.parse(args, Opts()) match {
+      case Some(config) => startRepl(config)
+      case None =>
+    }
+  }
+
+  case class Opts(endpoint: Option[String] = None)
+
+  sealed trait Paging[A] {
+    def pageData: Iterator[Try[List[A]]]
+  }
+
+  final class TablePaging(
+    val select: Ast.Select,
+    val pageData: Iterator[Try[List[Item]]]
+  ) extends Paging[Item]
+
+  final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging[String]
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
@@ -50,11 +53,12 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
-  def main(args: Array[String]): Unit = {
-    val conf = new Conf(args)
-    val endpoint = conf.endpoint.get
-    val client = dynamoClient(endpoint)
+  val parser = new scopt.OptionParser[Opts]("dynamite") {
+    opt[String]("endpoint").action((x, c) =>
+      c.copy(endpoint = Some(x))).text("aws endpoint")
+  }
 
+  def startRepl(opts: Opts) = {
     val reader = new ConsoleReader()
 
     val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
@@ -80,15 +84,36 @@ object Repl {
     //      reader.setCompletionHandler(handler)
 
     val out = new PrintWriter(reader.getOutput)
-    val eval = Eval(client)
 
-    loop(eval, reader, out)
+    class Lazy[A](value: => A) {
+      var accessed = false
+      private[this] lazy val _value = {
+        accessed = true
+        value
+      }
+      def apply() = _value
+    }
 
+    val client = new Lazy({
+      println("Connecting to Dynamo...")
+      dynamoClient(opts.endpoint)
+    })
+    lazy val eval = Eval(client())
+
+    // To increase repl start time, the client is initialize lazily. This save .5 second, which is
+    // instead felt by the user when making the first query
+    def run(query: Ast.Query) = eval.run(query)
+
+    loop(run, reader, out)
+
+    if (client.accessed) {
+      client().shutdown()
+    }
     history.flush()
     reader.shutdown()
   }
 
-  def loop(eval: Eval, reader: ConsoleReader, out: PrintWriter) = {
+  def loop(eval: Ast.Query => Try[Response], reader: ConsoleReader, out: PrintWriter) = {
     def parsed[A](line: String)(f: Ast.Query => A) = {
       Parser(line.trim) match {
         case Parsed.Success(query, _) => f(query)
@@ -106,7 +131,7 @@ object Repl {
     }
 
     def run[A](query: Ast.Query)(f: Response => A) = {
-      eval.run(query) match {
+      eval(query) match {
         case Success(results) => f(results)
         case Failure(ex) => reportError(ex.getMessage)
       }
@@ -209,7 +234,6 @@ object Repl {
     while ({ line = nextChar; line != null }) {
       reader.setEchoCharacter(0.toChar)
       val trimmed = line.trim
-      println(s"got $trimmed")
       if (inPager) {
         // q is used to quit pagination
         if (trimmed == "q")
