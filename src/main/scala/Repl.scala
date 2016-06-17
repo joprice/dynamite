@@ -1,17 +1,20 @@
 package dynamite
 
 import java.io.{ File, PrintWriter }
+
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
 import fastparse.core.Parsed
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
+
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
-import dynamite.Ast.All
+import dynamite.Ast.{ All, ShowTables }
 import fansi._
 import play.api.libs.json.{ JsObject, JsValue, Json }
+
 import scala.util.{ Failure, Success, Try }
 import org.rogach.scallop._
 
@@ -104,10 +107,16 @@ object Repl {
 
     def inPager = paging != null
 
-    class Paging(
+    sealed trait Paging {
+      def pageData: Iterator[Try[List[String]]]
+    }
+
+    final class TablePaging(
       val select: Ast.Select,
       val pageData: Iterator[Try[List[String]]]
-    )
+    ) extends Paging
+
+    final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging
 
     def resetPagination() = {
       paging = null
@@ -123,7 +132,14 @@ object Repl {
           case Success(values) =>
             //TODO: if results is less than page size, finish early?
             if (values.nonEmpty) {
-              render(values, paging.select.projection)
+              paging match {
+                case paging: TablePaging =>
+                  render(values, paging.select.projection)
+                case paging: TableNamePaging =>
+                  val headers = Seq(Bold.On(Str("name")))
+                  //TODO: move headers into table
+                  Table(out, headers +: values.map(name => Seq(Str(name))))
+              }
             }
             if (!paging.pageData.hasNext) {
               resetPagination()
@@ -139,11 +155,15 @@ object Repl {
       case (select: Ast.Select, ResultSet(resultSet)) =>
         // TODO: completion: success/failure, time, result count, indicate empty?
         //TODO: add flag with query cost
-        paging = new Paging(select, resultSet)
+        paging = new TablePaging(select, resultSet)
         nextPage()
       case (update: Ast.Update, Complete) =>
       //TODO: output for update / delete /ddl
-      case _ => //invalid
+      case (ShowTables, ResultSet(resultSet)) =>
+        paging = new TableNamePaging(resultSet)
+        nextPage()
+      case unhandled =>
+        out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
     }
 
     //TODO: when projecting all fields, show hash/sort keys first?

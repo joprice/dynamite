@@ -89,8 +89,10 @@ object Parser {
         Insert(table, pairs)
     }
 
+  val showTables = P("show" ~ spaces ~ "tables").map(_ => ShowTables)
+
   val query = P((
-    update | select | delete | insert
+    update | select | delete | insert | showTables
   ) ~ spaces.? ~ End)
 
   def apply(input: String): Parsed[Query] = query.parse(input)

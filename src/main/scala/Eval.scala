@@ -1,11 +1,13 @@
 package dynamite
 
 import dynamite.Ast._
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
+import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, xspec }
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
 import java.util.{ Iterator => JIterator }
+
+import com.amazonaws.services.dynamodbv2.xspec.B
 
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
@@ -26,6 +28,14 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     case update: Update => runUpdate(update)
     case delete: Delete => runDelete(delete)
     case insert: Insert => runInsert(insert)
+    case ShowTables => showTables()
+  }
+
+  def showTables(): Try[ResultSet] = Try {
+    val it = dynamo.listTables().pages().iterator()
+    ResultSet(new RecoveringIterator(it).map {
+      _.map(_.asScala.toList.map(_.getTableName))
+    })
   }
 
   def runInsert(insert: Insert): Try[Complete.type] = Try {
@@ -62,7 +72,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   //TODO: change response to more informative type
   def runUpdate(update: Update): Try[Complete.type] = {
-    handle(update.table, Try {
+    handleFailure(update.table, Try {
       val table = dynamo.getTable(update.table)
       val Ast.PrimaryKey(hash, range) = update.key
       val baseSpec = new UpdateItemSpec()
@@ -85,35 +95,46 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     })
   }
 
-  private def handle[A](table: String, result: Try[A]) = {
+  private def handleFailure[A](table: String, result: Try[A]) = {
     result.recoverWith {
       case _: ResourceNotFoundException =>
         Failure(new Exception(s"Table '$table' does not exist"))
     }
   }
 
-  class RecoveringIterator[A](
-      select: Select,
-      original: JIterator[Page[Item, A]]
-  ) extends Iterator[Try[List[String]]] {
-
+  class RecoveringIterator[A, B](
+      original: JIterator[Page[A, B]]
+  ) extends Iterator[Try[JIterator[A]]] {
     private[this] var failed = false
 
     def next() = {
-      val result = Try(
-        original.next.iterator().asScala.toList.map(_.toJSON)
-      )
+      val result = Try(original.next.iterator())
       failed = result.isFailure
-      handle(select.from, result)
+      result
     }
 
     def hasNext = !failed && original.hasNext
   }
 
+  class TableIterator[A](
+      select: Select,
+      original: JIterator[Page[Item, A]]
+  ) extends Iterator[Try[List[String]]] {
+    private[this] val recovering = new RecoveringIterator(original)
+    private[this] var failed = false
+
+    def next() = {
+      val result = recovering.next().map(_.asScala.toList.map(_.toJSON))
+      handleFailure(select.from, result)
+    }
+
+    def hasNext = recovering.hasNext
+  }
+
   def runSelect(select: Select): Try[ResultSet] = Try {
     def render[A](results: ItemCollection[A]) = {
       val original = results.pages().iterator()
-      new RecoveringIterator(select, original)
+      new TableIterator(select, original)
     }
 
     //TODO: handle pagination - use withMaxPageSize instead?

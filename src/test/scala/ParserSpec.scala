@@ -176,5 +176,9 @@ class ParserSpec extends FlatSpec with Matchers {
       )
     )
   }
+
+  it should "allow listing of tables" in {
+    validate("show tables", ShowTables)
+  }
 }
 
