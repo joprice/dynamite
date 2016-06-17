@@ -1,0 +1,3 @@
+* remove play json dep for smaller download
+* relace scallop with scopt for faster startup
+* lazy initialize dynamo client for faster startup
