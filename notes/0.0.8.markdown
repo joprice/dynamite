@@ -1,0 +1,3 @@
+* add lists as a value type
+* improve numbers - negative numbers, floats
+* support new lines in parser
