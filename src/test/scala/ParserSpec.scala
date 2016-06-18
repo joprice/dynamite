@@ -99,9 +99,20 @@ class ParserSpec extends FlatSpec with Matchers {
     )
   }
 
-  it should "support arrays values " in {
+  it should "support array values " in {
     validate(
       "insert into playlists (id, tracks) values (1, [1,2,3])",
+      Select(
+        Fields(Seq("id", "name")),
+        "playlist",
+        Option(PrimaryKey(Key("id", IntValue(1)), None))
+      )
+    )
+  }
+
+  it should "support empty arrays" in {
+    validate(
+      "insert into playlists (id, tracks) values (1, [])",
       Select(
         Fields(Seq("id", "name")),
         "playlist",

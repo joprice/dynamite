@@ -36,8 +36,8 @@ object Parser {
     P(string.map(StringValue(_)) | integer.map(IntValue(_)))
 
   val listValue: Parser[ListValue] = P(
-    "[" ~/ space.rep ~ commaSeparated(value) ~ space.rep ~ "]"
-  ).map(ListValue.apply)
+    "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
+  ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
   val value = P(keyValue | listValue)
 
