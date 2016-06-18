@@ -1,16 +1,27 @@
 package dynamite
 
 import dynamite.Ast._
-import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, xspec }
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
 import java.util.{ Iterator => JIterator }
-
-import com.amazonaws.services.dynamodbv2.xspec.B
-
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
+
+class RecoveringIterator[A, B](
+    original: JIterator[Page[A, B]]
+) extends Iterator[Try[JIterator[A]]] {
+  private[this] var failed = false
+
+  def next() = {
+    val result = Try(original.next.iterator())
+    failed = result.isFailure
+    result
+  }
+
+  def hasNext = !failed && original.hasNext
+}
 
 object Eval {
   def apply[A](client: AmazonDynamoDB) = new Eval(client)
@@ -21,7 +32,7 @@ final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
 final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
 case object Complete extends Response
 
-class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
+class Eval(client: AmazonDynamoDB, pageSize: Int = 5) {
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
@@ -102,20 +113,6 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
       case _: ResourceNotFoundException =>
         Failure(new Exception(s"Table '$table' does not exist"))
     }
-  }
-
-  class RecoveringIterator[A, B](
-      original: JIterator[Page[A, B]]
-  ) extends Iterator[Try[JIterator[A]]] {
-    private[this] var failed = false
-
-    def next() = {
-      val result = Try(original.next.iterator())
-      failed = result.isFailure
-      result
-    }
-
-    def hasNext = !failed && original.hasNext
   }
 
   class TableIterator[A](

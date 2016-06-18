@@ -112,6 +112,11 @@ object Parser {
     update | select | delete | insert | showTables
   ) ~ spaces.? ~ End)
 
-  def apply(input: String): Parsed[Query] = query.parse(input)
-
+  def apply(input: String): Either[Parsed.Failure, Query] = {
+    import fastparse.core.Parsed.{ Failure, Success }
+    query.parse(input) match {
+      case Success(query, _) => Right(query)
+      case failure: Failure => Left(failure)
+    }
+  }
 }

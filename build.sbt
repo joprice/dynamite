@@ -1,5 +1,7 @@
 
-enablePlugins(JavaAppPackaging)
+enablePlugins(JavaAppPackaging, BuildInfoPlugin)
+
+buildInfoPackage := "dynamite"
 
 scalaVersion := "2.11.8"
 
@@ -40,4 +42,16 @@ GithubRelease.repo := "joprice/dynamite"
 //GithubRelease.draft := true
 
 GithubRelease.releaseAssets := Seq((packageBin in Universal).value)
+
+scalacOptions in (Compile, compile) ++= Seq(
+  "-encoding",
+  "UTF-8",
+  "-deprecation", 
+  "-feature", 
+  "-unchecked", 
+  "-Xlint", 
+  "-Ywarn-adapted-args", 
+  "-Ywarn-inaccessible",
+  "-Ywarn-dead-code"
+)
 

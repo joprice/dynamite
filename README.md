@@ -47,3 +47,22 @@ dql> delete from playlists where userId = 1 and id = 10
 ```sql
 dql> show tables
 ```
+
+# Scripting
+
+Dynamite can also be used to run a single script:
+
+```bash
+dynamite < query.dql 
+```
+
+By default, the output is the same as the repl output. This can also be set
+to 'json' or 'json-pretty':
+
+```bash
+dynamite --format=json < query.dql 
+
+dynamite --format=json-pretty < query.dql 
+```
+
+

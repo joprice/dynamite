@@ -1,6 +1,7 @@
 package dynamite
 
-import java.io.{ File, PrintWriter }
+import java.io.{ File, PrintWriter, StringWriter }
+import java.util.stream.Collectors
 
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
@@ -12,22 +13,86 @@ import jline.console.history.FileHistory
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
+import scala.annotation.tailrec
 import dynamite.Ast.{ All, ShowTables }
 import fansi._
+import jline.internal.Ansi
 
-import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
 
 object Repl {
 
   def main(args: Array[String]): Unit = {
-    parser.parse(args, Opts()) match {
-      case Some(config) => startRepl(config)
+    Opts.parser.parse(args, Opts()) match {
+      case Some(config) =>
+        if (System.console() == null) {
+          runNonInteractive(config)
+        } else {
+          runInteractive(config)
+        }
       case None =>
     }
   }
 
-  case class Opts(endpoint: Option[String] = None)
+  def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
+    val client = dynamoClient(opts.endpoint)
+    try {
+      f(client)
+    } finally {
+      client.shutdown()
+    }
+  }
+
+  def runNonInteractive(opts: Opts) = {
+    val input = Console.in.lines().collect(Collectors.joining("\n"))
+    val result = Parser(input).fold({ failure =>
+      Left(Ansi.stripAnsi(parseError(input, failure)))
+    }, { query =>
+      withClient(opts) { client =>
+        Eval(client).run(query) match {
+          case Success(results) =>
+            (query, results) match {
+              case (select: Ast.Select, ResultSet(pages)) =>
+                // paginate through the results, exiting at the first failure and printing as each page is processed
+                var result: Either[String, Unit] = Right(())
+                var first = true
+                while (result.isRight && pages.hasNext) {
+                  pages.next match {
+                    case Success(values) =>
+                      val output = opts.render match {
+                        case Format.Tabular =>
+                          Ansi.stripAnsi(render(
+                            values,
+                            select.projection,
+                            withHeaders = first,
+                            align = false
+                          )).trim
+                        case Format.Json =>
+                          values.map(_.toJSON).mkString("\n")
+                        case Format.JsonPretty =>
+                          values.map(_.toJSONPretty).mkString("\n")
+                      }
+                      Console.out.println(output)
+                      first = false
+                    case Failure(ex) =>
+                      result = Left(ex.getMessage)
+                  }
+                }
+                result
+              case (ShowTables, TableNames(names)) => Right(())
+              //TODO: print update/delete success/failiure
+              case unhandled => Left(s"unhandled response $unhandled")
+            }
+          case Failure(ex) => Left(ex.getMessage)
+        }
+      }
+    })
+
+    result.left.foreach { reason =>
+      Console.err.println(reason)
+      sys.exit(1)
+    }
+  }
 
   sealed trait Paging[A] {
     def pageData: Iterator[Try[List[A]]]
@@ -39,6 +104,45 @@ object Repl {
   ) extends Paging[Item]
 
   final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging[String]
+
+  //TODO: when projecting all fields, show hash/sort keys first?
+  def render(
+    list: Seq[Item],
+    select: Ast.Projection,
+    withHeaders: Boolean = true,
+    align: Boolean = true
+  ): String = {
+    val headers = select match {
+      case All =>
+        list.headOption
+          .fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq)
+          .sorted
+      case Ast.Fields(fields) => fields
+    }
+    //TODO: not all fields need the same names. If All was provided in the query,
+    // alphas sort by fields present in all objects, followed by the sparse ones?
+    //TODO: match order provided if not star
+    val body = list.map { item =>
+      val data = item.asMap.asScala
+      // missing fields are represented by an empty str
+      headers.map {
+        header => Str(data.get(header).map(_.toString).getOrElse(""))
+      }
+    }
+    val rows = if (withHeaders) {
+      headers.map(header => Bold.On(Str(header))) +: body
+    } else body
+    if (align) {
+      val writer = new StringWriter()
+      val out = new PrintWriter(writer)
+      Table(out, rows)
+      writer.toString
+    } else {
+      rows
+        .map(row => row.mkString("\t"))
+        .mkString("\n")
+    }
+  }
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
@@ -56,12 +160,7 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
-  val parser = new scopt.OptionParser[Opts]("dynamite") {
-    opt[String]("endpoint").action((x, c) =>
-      c.copy(endpoint = Some(x))).text("aws endpoint")
-  }
-
-  def startRepl(opts: Opts) = {
+  def runInteractive(opts: Opts) = {
     val reader = new ConsoleReader()
 
     val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
@@ -98,29 +197,16 @@ object Repl {
     reader.shutdown()
   }
 
+  def parseError(line: String, failure: Parsed.Failure) = {
+    //TODO: improve error output - use fastparse error
+    s"""${formatError("Failed to parse query")}
+      |${Color.Red(line)}
+      |${(" " * failure.index) + "^"}""".stripMargin
+  }
+
+  def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
+
   def loop(eval: Ast.Query => Try[Response], reader: ConsoleReader, out: PrintWriter) = {
-    def parsed[A](line: String)(f: Ast.Query => A) = {
-      Parser(line.trim) match {
-        case Parsed.Success(query, _) => f(query)
-        case failure: Parsed.Failure => parseError(line, failure)
-      }
-    }
-
-    def reportError(msg: String) = out.println(s"[${Bold.On(Color.Red(Str("error")))}] $msg")
-
-    def parseError(line: String, failure: Parsed.Failure) = {
-      //TODO: improve error output - use fastparse error
-      reportError("Failed to parse query")
-      out.println(Color.Red(line))
-      out.println((" " * failure.index) + "^")
-    }
-
-    def run[A](query: Ast.Query)(f: Response => A) = {
-      eval(query) match {
-        case Success(results) => f(results)
-        case Failure(ex) => reportError(ex.getMessage)
-      }
-    }
 
     var paging: Paging[_] = null
 
@@ -149,14 +235,14 @@ object Repl {
               }
             case Failure(ex) =>
               resetPagination()
-              reportError(ex.getMessage)
+              out.println(formatError(ex.getMessage))
           }
         }
 
         paging match {
           case paging: TablePaging =>
             handle(paging) { values =>
-              render(values, paging.select.projection)
+              out.println(render(values, paging.select.projection))
             }
           case paging: TableNamePaging =>
             handle(paging) { values =>
@@ -183,28 +269,6 @@ object Repl {
         out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
     }
 
-    //TODO: when projecting all fields, show hash/sort keys first?
-    def render(list: Seq[Item], select: Ast.Projection) = {
-      val headers = select match {
-        case All =>
-          list.headOption
-            .fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq)
-            .sorted
-        case Ast.Fields(fields) => fields
-      }
-      //TODO: not all fields need the same names. If All was provided in the query,
-      // alphas sort by fields present in all objects, followed by the sparse ones?
-      //TODO: match order provided if not star
-      val body = list.map { item =>
-        val data = item.asMap.asScala
-        // missing fields are represented by an empty str
-        headers.map {
-          header => Str(data.get(header).map(_.toString).getOrElse(""))
-        }
-      }
-      Table(out, headers.map(header => Bold.On(Str(header))) +: body)
-    }
-
     @tailrec def repl(): Unit = {
       // While paging, a single char is read so that a new line is not required to
       // go the next page, or quit the pager
@@ -222,11 +286,13 @@ object Repl {
         } else {
           if (trimmed.nonEmpty) {
             //TODO: switch to either with custom error type for console output
-            parsed(line.trim) { query =>
-              run(query) { results =>
-                report(query, results)
-              }
-            }
+            Parser(line)
+              .fold(failure => out.println(parseError(line, failure)), { query =>
+                eval(query) match {
+                  case Success(results) => report(query, results)
+                  case Failure(ex) => formatError(ex.getMessage)
+                }
+              })
           }
         }
         out.flush()
@@ -236,5 +302,6 @@ object Repl {
 
     repl()
   }
+
 }
 
