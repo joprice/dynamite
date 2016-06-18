@@ -113,6 +113,7 @@ object Parser {
   ) ~ spaces.? ~ End)
 
   def apply(input: String): Either[Parsed.Failure, Query] = {
+    // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     import fastparse.core.Parsed.{ Failure, Success }
     query.parse(input) match {
       case Success(query, _) => Right(query)

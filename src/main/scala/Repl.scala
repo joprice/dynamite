@@ -269,7 +269,7 @@ object Repl {
         out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
     }
 
-    @tailrec def repl(): Unit = {
+    @tailrec def repl(buffer: String): Unit = {
       // While paging, a single char is read so that a new line is not required to
       // go the next page, or quit the pager
       val line = if (inPager) {
@@ -277,30 +277,35 @@ object Repl {
       } else reader.readLine()
       if (line != null) {
         val trimmed = line.trim
-        if (inPager) {
+        val updated = if (inPager) {
           // q is used to quit pagination
           if (trimmed == "q")
             resetPagination()
           else
             nextPage()
+          ""
+        } else if (trimmed.contains(";")) {
+          resetPrompt(reader)
+          //TODO: switch to either with custom error type for console output
+          val stripped = s"$buffer\n${line.stripSuffix(";")}"
+          Parser(stripped)
+            .fold(failure => out.println(parseError(stripped, failure)), { query =>
+              eval(query) match {
+                case Success(results) => report(query, results)
+                case Failure(ex) => formatError(ex.getMessage)
+              }
+            })
+          ""
         } else {
-          if (trimmed.nonEmpty) {
-            //TODO: switch to either with custom error type for console output
-            Parser(line)
-              .fold(failure => out.println(parseError(line, failure)), { query =>
-                eval(query) match {
-                  case Success(results) => report(query, results)
-                  case Failure(ex) => formatError(ex.getMessage)
-                }
-              })
-          }
+          reader.setPrompt(Bold.On(Str("  -> ")).render)
+          s"$buffer\n$line"
         }
         out.flush()
-        repl()
+        repl(updated)
       }
     }
 
-    repl()
+    repl("")
   }
 
 }

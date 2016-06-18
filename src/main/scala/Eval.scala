@@ -32,7 +32,7 @@ final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
 final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
 case object Complete extends Response
 
-class Eval(client: AmazonDynamoDB, pageSize: Int = 5) {
+class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
