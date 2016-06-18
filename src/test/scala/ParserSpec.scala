@@ -5,9 +5,9 @@ import Ast._
 
 class ParserSpec extends FlatSpec with Matchers {
 
-  def validate(query: String, result: Query) = {
+  def validate(query: String, expected: Query) = {
     val result = Parser(query).get.value
-    result should be(result)
+    expected should be(result)
   }
 
   "parser" should "parse wildcard fields" in {
@@ -69,7 +69,7 @@ class ParserSpec extends FlatSpec with Matchers {
         "playlist",
         Option(
           PrimaryKey(
-            Key("userId", IntValue(1)),
+            Key("userId", IntValue("1")),
             Some(Key("id", StringValue("user-id-1")))
           )
         )
@@ -94,7 +94,51 @@ class ParserSpec extends FlatSpec with Matchers {
       Select(
         Fields(Seq("id", "name")),
         "playlist",
-        Option(PrimaryKey(Key("id", IntValue(1)), None))
+        Option(PrimaryKey(Key("id", IntValue("1")), None))
+      )
+    )
+  }
+
+  it should "support floating point values" in {
+    validate(
+      "update playlist set duration = 1.1 where id = 1",
+      Update(
+        "playlist",
+        Seq("duration" -> FloatValue("1.1")),
+        PrimaryKey(Key("id", IntValue("1")), None)
+      )
+    )
+  }
+
+  it should "support floating point values without leading integer" in {
+    validate(
+      "update playlist set duration = .1 where id = 1",
+      Update(
+        "playlist",
+        Seq("duration" -> FloatValue(".1")),
+        PrimaryKey(Key("id", IntValue("1")), None)
+      )
+    )
+  }
+
+  it should "support negative floating point values" in {
+    validate(
+      "update playlist set duration = -.1 where id = 1",
+      Update(
+        "playlist",
+        Seq("duration" -> FloatValue("-.1")),
+        PrimaryKey(Key("id", IntValue("1")), None)
+      )
+    )
+  }
+
+  it should "support negative int values" in {
+    validate(
+      "update playlist set duration = -1 where id = 1",
+      Update(
+        "playlist",
+        Seq("duration" -> IntValue("-1")),
+        PrimaryKey(Key("id", IntValue("1")), None)
       )
     )
   }
@@ -102,10 +146,14 @@ class ParserSpec extends FlatSpec with Matchers {
   it should "support array values " in {
     validate(
       "insert into playlists (id, tracks) values (1, [1,2,3])",
-      Select(
-        Fields(Seq("id", "name")),
-        "playlist",
-        Option(PrimaryKey(Key("id", IntValue(1)), None))
+      Insert(
+        "playlists",
+        Seq(
+          "id" -> IntValue("1"),
+          "tracks" -> ListValue(Seq(
+            IntValue("1"), IntValue("2"), IntValue("3")
+          ))
+        )
       )
     )
   }
@@ -113,10 +161,12 @@ class ParserSpec extends FlatSpec with Matchers {
   it should "support empty arrays" in {
     validate(
       "insert into playlists (id, tracks) values (1, [])",
-      Select(
-        Fields(Seq("id", "name")),
-        "playlist",
-        Option(PrimaryKey(Key("id", IntValue(1)), None))
+      Insert(
+        "playlists",
+        Seq(
+          "id" -> IntValue("1"),
+          "tracks" -> ListValue(Seq.empty)
+        )
       )
     )
   }
@@ -177,7 +227,7 @@ class ParserSpec extends FlatSpec with Matchers {
         Seq("name" -> StringValue("Chillax")),
         PrimaryKey(
           Key("userId", StringValue("user-id-1")),
-          Some(Key("id", IntValue(1)))
+          Some(Key("id", IntValue("1")))
         )
       )
     )
@@ -186,12 +236,11 @@ class ParserSpec extends FlatSpec with Matchers {
   it should "allow deleting a record" in {
     validate(
       "delete from playlists where userId = 'user-id-1' and id = 1",
-      Update(
+      Delete(
         "playlists",
-        Seq("name" -> StringValue("Chillax")),
         PrimaryKey(
           Key("userId", StringValue("user-id-1")),
-          Some(Key("id", IntValue(1)))
+          Some(Key("id", IntValue("1")))
         )
       )
     )
@@ -204,7 +253,7 @@ class ParserSpec extends FlatSpec with Matchers {
         "playlists",
         Seq(
           "userId" -> StringValue("user-id-1"),
-          "id" -> IntValue(1)
+          "id" -> IntValue("1")
         )
       )
     )

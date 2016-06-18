@@ -46,7 +46,14 @@ object Ast {
   sealed abstract class KeyValue extends Value
 
   final case class StringValue(value: String) extends KeyValue
-  final case class IntValue(value: Int) extends KeyValue
+
+  /**
+   * NOTE: The constructors of IntValue and FloatValue keep their original string
+   * original representatio for debugging purposes.
+   */
+  sealed abstract class NumberValue(val value: Number) extends KeyValue
+  final case class IntValue(repr: String) extends NumberValue(BigInt(repr))
+  final case class FloatValue(repr: String) extends NumberValue(BigDecimal(repr))
 
   final case class ListValue(values: Seq[Value]) extends Value
 

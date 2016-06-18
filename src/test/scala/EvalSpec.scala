@@ -56,7 +56,8 @@ class EvalSpec
 
   def validate(query: String, expected: List[List[JsValue]]) = {
     val result = runQuery(query)
-    result.toList.map(_.get.map(item => Json.parse(item.toJSON))) should be(expected)
+    val json = result.toList.map(_.get.map(item => Json.parse(item.toJSON)))
+    json should be(expected)
   }
 
   "eval" should "select all records from dynamo" in {
@@ -134,6 +135,18 @@ class EvalSpec
     validate(
       "select name from playlists where userId = 'user-id-1' and id = 20", List(List(
         Json.obj("name" -> newName)
+      ))
+    )
+  }
+
+  it should "support float values" in {
+    val newName = "Throwback Thursday"
+    runUpdate(
+      s"""insert into playlists (userId, id, name, duration) values ('user-id-1', 20, "$newName", 1.1)"""
+    )
+    validate(
+      "select duration from playlists where userId = 'user-id-1' and id = 20", List(List(
+        Json.obj("duration" -> 1.1)
       ))
     )
   }

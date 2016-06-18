@@ -24,16 +24,23 @@ object Parser {
 
   val string = P(str('"') | str('\''))
 
-  val integer = {
+  val integer = P("-".? ~ {
     val num = P(CharIn('0' to '9'))
     val nonZeroNum = P(CharIn('1' to '9'))
-    P(nonZeroNum ~ num.rep | "0").!.map(_.toInt)
-  }
+    P(nonZeroNum ~ num.rep | "0").!
+  }).!
+
+  val float = P("-".? ~ integer.? ~ "." ~ integer).!
 
   def setField[A](value: Parser[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
-  val keyValue: Parser[KeyValue] =
-    P(string.map(StringValue(_)) | integer.map(IntValue(_)))
+  val stringValue = P(string.map(StringValue(_)))
+  val floatValue = P(float.map(FloatValue(_)))
+  val integerValue = P(integer.map(IntValue(_)))
+  val numberValue = P(floatValue | integerValue)
+
+  // keys support strings, number, and binary (TODO: support 'binary' input?)
+  val keyValue: Parser[KeyValue] = P(stringValue | numberValue)
 
   val listValue: Parser[ListValue] = P(
     "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
@@ -42,7 +49,7 @@ object Parser {
   val value = P(keyValue | listValue)
 
   //TODO: fail parse on invalid numbers?
-  val limit = P("limit" ~/ spaces ~ integer)
+  val limit = P("limit" ~/ spaces ~ integer.map(_.toInt))
 
   val key = P(setField(keyValue).map((Key.apply _).tupled))
 
@@ -88,6 +95,9 @@ object Parser {
   val insert = P(
     "insert" ~/ spaces ~
       "into" ~ spaces ~ ident ~ spaces ~
+      // it would be nice to have column names be optional, but there is no
+      // stable order of a dynamo schema. Some convetion could be introduced, but it
+      // might surprising. Optional feature?
       "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
       "values" ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
   ).map {

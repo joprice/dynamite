@@ -60,7 +60,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   private def unwrap(value: Value): AnyRef = value match {
     case StringValue(value) => value
-    case IntValue(value) => value: java.lang.Integer
+    case number: NumberValue => number.value
     case ListValue(value) => value.map(unwrap).asJava
   }
 
