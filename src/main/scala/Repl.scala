@@ -1,6 +1,7 @@
 package dynamite
 
 import java.io.{ File, PrintWriter }
+
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
@@ -13,6 +14,8 @@ import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import dynamite.Ast.{ All, ShowTables }
 import fansi._
+
+import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
 
 object Repl {
@@ -184,10 +187,9 @@ object Repl {
     def render(list: Seq[Item], select: Ast.Projection) = {
       val headers = select match {
         case All =>
-          list.headOption.fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq).sorted
-        /*list.headOption.map(Json.parse(_).as[JsObject].keys)
-            .fold(Seq.empty[String])(_.toSeq).sorted
-            */
+          list.headOption
+            .fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq)
+            .sorted
         case Ast.Fields(fields) => fields
       }
       //TODO: not all fields need the same names. If All was provided in the query,
@@ -195,7 +197,6 @@ object Repl {
       //TODO: match order provided if not star
       val body = list.map { item =>
         val data = item.asMap.asScala
-        //val data = Json.parse(item).as[Map[String, JsValue]]
         // missing fields are represented by an empty str
         headers.map {
           header => Str(data.get(header).map(_.toString).getOrElse(""))
@@ -204,35 +205,36 @@ object Repl {
       Table(out, headers.map(header => Bold.On(Str(header))) +: body)
     }
 
-    // While paging, a single char is read so that a new line is not required to
-    // go the next page, or quit the pager
-    def nextChar = if (inPager) {
-      reader.readCharacter().toChar.toString
-    } else reader.readLine()
-
-    //TODO: rewrite using tailrec?
-    var line: String = null
-
-    while ({ line = nextChar; line != null }) {
-      val trimmed = line.trim
-      if (inPager) {
-        // q is used to quit pagination
-        if (trimmed == "q")
-          resetPagination()
-        else
-          nextPage()
-      } else {
-        if (trimmed.nonEmpty) {
-          //TODO: switch to either with custom error type for console output
-          parsed(line.trim) { query =>
-            run(query) { results =>
-              report(query, results)
+    @tailrec def repl(): Unit = {
+      // While paging, a single char is read so that a new line is not required to
+      // go the next page, or quit the pager
+      val line = if (inPager) {
+        reader.readCharacter().toChar.toString
+      } else reader.readLine()
+      if (line != null) {
+        val trimmed = line.trim
+        if (inPager) {
+          // q is used to quit pagination
+          if (trimmed == "q")
+            resetPagination()
+          else
+            nextPage()
+        } else {
+          if (trimmed.nonEmpty) {
+            //TODO: switch to either with custom error type for console output
+            parsed(line.trim) { query =>
+              run(query) { results =>
+                report(query, results)
+              }
             }
           }
         }
+        out.flush()
+        repl()
       }
-      out.flush()
     }
+
+    repl()
   }
 }
 
