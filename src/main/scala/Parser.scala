@@ -11,9 +11,8 @@ object Parser {
 
   def commaSeparated[A](parser: Parser[A]) = parser.rep(1, sep = "," ~/ space.rep)
 
-  val space = P(" ")
+  val space = P(" " | "\n")
 
-  //TODO: support new lines?
   val spaces = P(space.rep(1))
 
   //TODO: support hyphens in fields?
@@ -21,6 +20,8 @@ object Parser {
 
   def str(delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
+
+  def setField[A](value: Parser[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
   val string = P(str('"') | str('\''))
 
@@ -32,8 +33,6 @@ object Parser {
 
   val float = P("-".? ~ integer.? ~ "." ~ integer).!
 
-  def setField[A](value: Parser[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
-
   val stringValue = P(string.map(StringValue(_)))
   val floatValue = P(float.map(FloatValue(_)))
   val integerValue = P(integer.map(IntValue(_)))
@@ -42,6 +41,7 @@ object Parser {
   // keys support strings, number, and binary (TODO: support 'binary' input?)
   val keyValue: Parser[KeyValue] = P(stringValue | numberValue)
 
+  //TODO: distinguish set/list in some operations?
   val listValue: Parser[ListValue] = P(
     "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
   ).map(value => ListValue(value.getOrElse(Seq.empty)))
@@ -108,7 +108,7 @@ object Parser {
 
   val showTables = P("show" ~ spaces ~ "tables").map(_ => ShowTables)
 
-  val query = P((
+  val query = P(spaces.? ~ (
     update | select | delete | insert | showTables
   ) ~ spaces.? ~ End)
 

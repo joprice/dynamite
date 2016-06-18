@@ -263,5 +263,21 @@ class ParserSpec extends FlatSpec with Matchers {
     validate("show tables", ShowTables)
   }
 
+  it should "support multiline queries" in {
+    validate(
+      """
+      |insert into playlists
+      |(userId, id)
+      |values ('user-id-1', 1)
+      |""".stripMargin,
+      Insert(
+        "playlists",
+        Seq(
+          "userId" -> StringValue("user-id-1"),
+          "id" -> IntValue("1")
+        )
+      )
+    )
+  }
 }
 
