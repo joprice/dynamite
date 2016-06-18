@@ -43,7 +43,7 @@ class EvalSpec
     client.shutdown()
   }
 
-  def run(query: String) = eval.run(Parser(query).get.value).get
+  def run(query: String) = eval.run(Parser(query).right.get).get
 
   def runQuery(query: String) = {
     val ResultSet(result) = run(query)

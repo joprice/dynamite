@@ -6,7 +6,7 @@ import Ast._
 class ParserSpec extends FlatSpec with Matchers {
 
   def validate(query: String, expected: Query) = {
-    val result = Parser(query).get.value
+    val result = Parser(query).right.get
     expected should be(result)
   }
 
