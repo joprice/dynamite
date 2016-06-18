@@ -11,51 +11,51 @@ class ParserSpec extends FlatSpec with Matchers {
   }
 
   "parser" should "parse wildcard fields" in {
-    validate("select * from collection", Select(All, "collection"))
+    validate("select * from playlist", Select(All, "playlist"))
   }
 
   "parser" should "allow dashes in ident" in {
-    validate("select * from collection-legacy", Select(All, "collection-legacy"))
+    validate("select * from playlist-legacy", Select(All, "playlist-legacy"))
   }
 
   "parser" should "parse a single field" in {
-    validate("select id from collection", Select(Fields(Seq("id")), "collection"))
+    validate("select id from playlist", Select(Fields(Seq("id")), "playlist"))
   }
 
   it should "allow multiple fields" in {
     validate(
-      "select id,name from collection",
-      Select(Fields(Seq("id", "name")), "collection")
+      "select id,name from playlist",
+      Select(Fields(Seq("id", "name")), "playlist")
     )
   }
 
   it should "tolerate whitespace between fields" in {
     validate(
-      "select id,    name from collection",
-      Select(Fields(Seq("id", "name")), "collection")
+      "select id,    name from playlist",
+      Select(Fields(Seq("id", "name")), "playlist")
     )
   }
 
   it should "tolerate whitespace before from" in {
     validate(
-      "select id, name     from collection",
-      Select(Fields(Seq("id", "name")), "collection")
+      "select id, name     from playlist",
+      Select(Fields(Seq("id", "name")), "playlist")
     )
   }
 
   it should "tolerate whitespace before table name" in {
     validate(
-      "select id, name from          collection",
-      Select(Fields(Seq("id", "name")), "collection")
+      "select id, name from          playlist",
+      Select(Fields(Seq("id", "name")), "playlist")
     )
   }
 
   it should "support filtering by a hash key" in {
     validate(
-      "select id, name from collection where id = 'user-id-1'",
+      "select id, name from playlist where id = 'user-id-1'",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         Option(PrimaryKey(Key("id", StringValue("user-id-1")), None))
       )
     )
@@ -63,10 +63,10 @@ class ParserSpec extends FlatSpec with Matchers {
 
   it should "support filtering by a hash and sort key" in {
     validate(
-      "select id, name from collection where userId = 1 and id = 'user-id-1'",
+      "select id, name from playlist where userId = 1 and id = 'user-id-1'",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         Option(
           PrimaryKey(
             Key("userId", IntValue(1)),
@@ -79,21 +79,43 @@ class ParserSpec extends FlatSpec with Matchers {
 
   it should "support double-quoted string as well" in {
     validate(
-      "select id, name from collection where id = \"user-id-1\"",
+      "select id, name from playlist where id = \"user-id-1\"",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         Option(PrimaryKey(Key("id", StringValue("user-id-1")), None))
+      )
+    )
+  }
+
+  it should "support integer values " in {
+    validate(
+      "select id, name from playlist where id = 1",
+      Select(
+        Fields(Seq("id", "name")),
+        "playlist",
+        Option(PrimaryKey(Key("id", IntValue(1)), None))
+      )
+    )
+  }
+
+  it should "support arrays values " in {
+    validate(
+      "insert into playlists (id, tracks) values (1, [1,2,3])",
+      Select(
+        Fields(Seq("id", "name")),
+        "playlist",
+        Option(PrimaryKey(Key("id", IntValue(1)), None))
       )
     )
   }
 
   it should "tolerate spaces around limit" in {
     validate(
-      "select id, name from collection    limit 10",
+      "select id, name from playlist    limit 10",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         limit = Some(10)
       )
     )
@@ -101,10 +123,10 @@ class ParserSpec extends FlatSpec with Matchers {
 
   it should "allow selecting ascending order" in {
     validate(
-      "select id, name from collection asc limit 10",
+      "select id, name from playlist asc limit 10",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         None,
         Some(Ascending),
         Some(10)
@@ -114,10 +136,10 @@ class ParserSpec extends FlatSpec with Matchers {
 
   it should "allow selecting descending order" in {
     validate(
-      "select id, name from collection desc limit 10",
+      "select id, name from playlist desc limit 10",
       Select(
         Fields(Seq("id", "name")),
-        "collection",
+        "playlist",
         None,
         Some(Descending),
         Some(10)
@@ -170,8 +192,8 @@ class ParserSpec extends FlatSpec with Matchers {
       Insert(
         "playlists",
         Seq(
-          Key("userId", StringValue("user-id-1")),
-          Key("id", IntValue(1))
+          "userId" -> StringValue("user-id-1"),
+          "id" -> IntValue(1)
         )
       )
     )
@@ -180,5 +202,6 @@ class ParserSpec extends FlatSpec with Matchers {
   it should "allow listing of tables" in {
     validate("show tables", ShowTables)
   }
+
 }
 

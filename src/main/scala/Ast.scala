@@ -28,7 +28,7 @@ object Ast {
 
   final case class Insert(
     table: String,
-    values: Seq[Key]
+    values: Seq[(String, Value)]
   ) extends Query
 
   case object ShowTables extends Query
@@ -42,15 +42,17 @@ object Ast {
   case object All extends Projection
 
   sealed abstract class Value extends Product with Serializable
-  final case class StringValue(value: String) extends Value
-  final case class IntValue(value: Int) extends Value
+
+  sealed abstract class KeyValue extends Value
+
+  final case class StringValue(value: String) extends KeyValue
+  final case class IntValue(value: Int) extends KeyValue
+
+  final case class ListValue(values: Seq[Value]) extends Value
 
   final case class Ident(name: String)
 
-  //TODO: multiple filters
-  //  final case class Where(field: String, value: Value)
-
-  final case class Key(field: String, value: Value)
+  final case class Key(field: String, value: KeyValue)
 
   final case class PrimaryKey(hash: Key, range: Option[Key])
 }

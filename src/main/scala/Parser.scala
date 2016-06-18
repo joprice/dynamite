@@ -7,17 +7,17 @@ import Ast._
 //TODO: case insensitive keyword
 object Parser {
 
+  def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
+
+  def commaSeparated[A](parser: Parser[A]) = parser.rep(1, sep = "," ~/ space.rep)
+
   val space = P(" ")
 
   //TODO: support new lines?
   val spaces = P(space.rep(1))
 
-  def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
-
   //TODO: support hyphens in fields?
   val ident = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')).rep.!)
-
-  val fields = P(ident.rep(1, sep = "," ~ space.rep))
 
   def str(delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
@@ -30,21 +30,21 @@ object Parser {
     P(nonZeroNum ~ num.rep | "0").!.map(_.toInt)
   }
 
-  val value = P(string.map(StringValue(_)) | integer.map(IntValue(_)))
+  def setField[A](value: Parser[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
-  val setField = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
+  val keyValue: Parser[KeyValue] =
+    P(string.map(StringValue(_)) | integer.map(IntValue(_)))
+
+  val listValue: Parser[ListValue] = P(
+    "[" ~/ space.rep ~ commaSeparated(value) ~ space.rep ~ "]"
+  ).map(ListValue.apply)
+
+  val value = P(keyValue | listValue)
 
   //TODO: fail parse on invalid numbers?
-  val limit = {
-    "limit" ~/ spaces ~ integer
-  }
+  val limit = P("limit" ~/ spaces ~ integer)
 
-  val direction: Parser[Direction] = P(
-    P("asc").map(_ => Ascending) |
-      P("desc").map(_ => Descending)
-  )
-
-  val key = P(setField.map((Key.apply _).tupled))
+  val key = P(setField(keyValue).map((Key.apply _).tupled))
 
   val primaryKey = P(
     "where" ~/ spaces ~ key
@@ -54,7 +54,14 @@ object Parser {
         PrimaryKey(hash, sortKey)
     }
 
+  val direction: Parser[Direction] = P(
+    P("asc").map(_ => Ascending) |
+      P("desc").map(_ => Descending)
+  )
+
   val from = P("from" ~ spaces ~ ident)
+
+  val fields = P(commaSeparated(ident))
 
   val projection = P(
     "select" ~/ spaces ~ ("*".!.map(_ => All) | fields.map(Fields(_)))
@@ -70,7 +77,7 @@ object Parser {
 
   val update = P(
     "update" ~/ spaces ~ ident ~ spaces ~
-      "set" ~ spaces ~ setField.rep(1, sep = "," ~/ spaces) ~ spaces ~
+      "set" ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
       primaryKey
   )
     .map((Update.apply _).tupled)
@@ -81,11 +88,11 @@ object Parser {
   val insert = P(
     "insert" ~/ spaces ~
       "into" ~ spaces ~ ident ~ spaces ~
-      "(" ~/ space.rep ~ ident.rep(1, sep = "," ~/ space.rep) ~ space.rep ~ ")" ~ spaces ~
-      "values" ~ spaces ~ "(" ~ space.rep ~ value.rep(1, sep = "," ~/ space.rep) ~ ")"
+      "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
+      "values" ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
   ).map {
       case (table, keys, values) =>
-        val pairs = keys.zip(values).map((Key.apply _).tupled)
+        val pairs = keys.zip(values)
         Insert(table, pairs)
     }
 

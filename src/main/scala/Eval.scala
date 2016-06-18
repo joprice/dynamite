@@ -42,7 +42,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   def runInsert(insert: Insert): Try[Complete.type] = Try {
     table(insert.table).putItem(
       insert.values.foldLeft(new Item()) {
-        case (item, Key(field, value)) => item.`with`(field, unwrap(value))
+        case (item, (field, value)) => item.`with`(field, unwrap(value))
       }
     )
     Complete
@@ -58,9 +58,10 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   private def table(tableName: String) = dynamo.getTable(tableName)
 
-  private def unwrap(value: Value) = value match {
+  private def unwrap(value: Value): AnyRef = value match {
     case StringValue(value) => value
-    case IntValue(value) => value
+    case IntValue(value) => value: java.lang.Integer
+    case ListValue(value) => value.map(unwrap).asJava
   }
 
   def toDynamoKey(key: Ast.PrimaryKey) = {
