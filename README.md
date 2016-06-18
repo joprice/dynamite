@@ -1,17 +1,18 @@
-# dynamite
+# Dynamite
+
 Dynamo query REPL
 
 [![CircleCI](https://circleci.com/gh/joprice/dynamite/tree/master.svg?style=svg)](https://circleci.com/gh/joprice/dynamite/tree/master)
 
-# Installing
+## Installing
 
 `brew tap joprice/tap && brew install dynamite`
 
-# Querying
+## Querying
 
 A limited subset of dynamo and sql are currently supported:
 
-## Select
+### Select
 
 ```sql
 dql> select * from playlists limit 10
@@ -25,30 +26,30 @@ dql> select * from playlists where userId = 1 and id = 2 limit 10
 dql> select id, name from playlists limit 1
 ```
 
-## Insert
+### Insert
 
 ```sql
 dql> insert into playlists (userId, id) values (1, 10)
 ```
-## Update
+### Update
 
 ```sql
 dql> update playlists set name = '80s Party' where userId = 1 and id = 10
 ```
 
-## Delete
+### Delete
 
 ```sql
 dql> delete from playlists where userId = 1 and id = 10
 ```
 
-## Show tables
+### Show tables
 
 ```sql
 dql> show tables
 ```
 
-# Scripting
+## Scripting
 
 Dynamite can also be used to run a single script:
 
