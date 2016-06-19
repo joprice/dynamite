@@ -14,7 +14,7 @@ import jline.console.history.FileHistory
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
-import dynamite.Ast.{ All, ShowTables }
+import dynamite.Ast._
 import fansi._
 import jline.internal.Ansi
 
@@ -52,7 +52,7 @@ object Repl {
         Eval(client).run(query) match {
           case Success(results) =>
             (query, results) match {
-              case (select: Ast.Select, ResultSet(pages)) =>
+              case (select: Ast.Select, Response.ResultSet(pages)) =>
                 // paginate through the results, exiting at the first failure and printing as each page is processed
                 var result: Either[String, Unit] = Right(())
                 var first = true
@@ -79,8 +79,12 @@ object Repl {
                   }
                 }
                 result
-              case (ShowTables, TableNames(names)) => Right(())
+              //TODO: write
+              case (ShowTables, Response.TableNames(names)) =>
+                Console.out.println(names.mkString("\n"))
+                Right(())
               //TODO: print update/delete success/failiure
+              case (DescribeTable(_), Response.TableNames(names)) => Right(())
               case unhandled => Left(s"unhandled response $unhandled")
             }
           case Failure(ex) => Left(ex.getMessage)
@@ -161,8 +165,8 @@ object Repl {
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
   def runInteractive(opts: Opts) = {
+    println(s"${Opts.appName} ${BuildInfo.version}")
     val reader = new ConsoleReader()
-
     val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
     reader.setHistory(history)
     resetPrompt(reader)
@@ -183,6 +187,8 @@ object Repl {
       dynamoClient(opts.endpoint)
     })
     lazy val eval = Eval(client())
+
+    reader.addCompleter(Completer(reader, eval.showTables, eval.describeTable))
 
     // To increase repl start time, the client is initialize lazily. This save .5 second, which is
     // instead felt by the user when making the first query
@@ -207,7 +213,6 @@ object Repl {
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
 
   def loop(eval: Ast.Query => Try[Response], reader: ConsoleReader, out: PrintWriter) = {
-
     var paging: Paging[_] = null
 
     def inPager = paging != null
@@ -254,17 +259,29 @@ object Repl {
       }
     }
 
+    def printTableDescription(description: Response.TableDescription) = {
+      val headers = Seq("name", "hash", "range")
+        .map(header => Bold.On(Str(header)))
+      val data: Seq[Str] = Str(description.name) +: description.key.map {
+        case (hash, range) =>
+          Seq(hash, range.getOrElse("")).map(Str(_))
+      }.getOrElse(Seq.empty[Str])
+      Table(out, Seq(headers, data))
+    }
+
     def report(query: Ast.Query, results: Response) = (query, results) match {
-      case (select: Ast.Select, ResultSet(resultSet)) =>
+      case (select: Ast.Select, Response.ResultSet(resultSet)) =>
         // TODO: completion: success/failure, time, result count, indicate empty?
         //TODO: add flag with query cost
         paging = new TablePaging(select, resultSet)
         nextPage()
-      case (update: Ast.Update, Complete) =>
+      case (update: Ast.Update, Response.Complete) =>
       //TODO: output for update / delete /ddl
-      case (ShowTables, TableNames(resultSet)) =>
+      case (ShowTables, Response.TableNames(resultSet)) =>
         paging = new TableNamePaging(resultSet)
         nextPage()
+      case (_: DescribeTable, description: Response.TableDescription) =>
+        printTableDescription(description)
       case unhandled =>
         out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
     }
@@ -277,13 +294,15 @@ object Repl {
       } else reader.readLine()
       if (line != null) {
         val trimmed = line.trim
-        val updated = if (inPager) {
+        val (updated, continue) = if (inPager) {
           // q is used to quit pagination
           if (trimmed == "q")
             resetPagination()
           else
             nextPage()
-          ""
+          ("", true)
+        } else if (trimmed == "quit") {
+          ("", false)
         } else if (trimmed.contains(";")) {
           resetPrompt(reader)
           //TODO: switch to either with custom error type for console output
@@ -295,13 +314,15 @@ object Repl {
                 case Failure(ex) => formatError(ex.getMessage)
               }
             })
-          ""
+          ("", true)
         } else {
           reader.setPrompt(Bold.On(Str("  -> ")).render)
-          s"$buffer\n$line"
+          (s"$buffer\n$line", true)
         }
         out.flush()
-        repl(updated)
+        if (continue) {
+          repl(updated)
+        }
       }
     }
 

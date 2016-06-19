@@ -1,0 +1,2 @@
+* Add multi-line input in repl. A semicolon is now required to issue queries.
+* Add non-interactive mode that reads a query from a file
