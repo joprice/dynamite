@@ -31,7 +31,7 @@ object Completer {
     lazy val tableNames = {
       val names = loadTables.map { tables =>
         //TODO: warn on any page failure
-        tables.names.toList.flatMap(_.toOption).flatten.sorted
+        tables.names.toList.flatMap(_.result.toOption).flatten.sorted
       }.getOrElse {
         //TODO: warn that fetching tables failed
         Seq.empty
@@ -56,35 +56,48 @@ object Completer {
     }
   }
 
-  class FieldsCompleter(reader: ConsoleReader, describeTables: String => Try[TableDescription]) extends Completer {
-    private[this] val tableNameCache = TrieMap[String, Seq[String]]()
+  class TableCache(describeTables: Lazy[String => Try[TableDescription]]) {
+    private[this] val tableNameCache = TrieMap[String, TableDescription]()
 
-    def keyNames(reader: ConsoleReader, describeTables: String => Try[TableDescription]) = {
+    def get(tableName: String): Option[TableDescription] = {
+      tableNameCache.get(tableName).orElse {
+        describeTables()(tableName).toOption.map { result =>
+          tableNameCache.put(tableName, result)
+          result
+        }
+      }
+    }
+  }
+
+  class FieldsCompleter(
+      reader: ConsoleReader,
+      tableCache: TableCache
+  ) extends Completer {
+    def keyNames(reader: ConsoleReader) = {
       import fastparse.core.Parsed.Success
       tableParser.parse(reader.getCursorBuffer.buffer.toString) match {
         case Success(name, _) => Some(name)
         case _ => None
       }
     }.fold(Seq.empty[String]) { name =>
-      tableNameCache.getOrElse(name, {
-        val keys = describeTables(name).toOption.map {
-          case TableDescription(_, Some((hash, range))) => Seq(hash) ++ range.toSeq
-          case _ => Seq.empty
-        }.getOrElse(Seq.empty)
-        if (keys.nonEmpty) {
-          tableNameCache.update(name, keys)
-        }
-        keys
-      })
+      tableCache.get(name).map {
+        case TableDescription(_, Some((hash, range))) =>
+          Seq(hash) ++ range.toSeq
+      }.getOrElse(Seq.empty)
     }
 
     override def complete(buffer: String, cursor: Int, candidates: java.util.List[CharSequence]) = {
-      new StringsCompleter(keyNames(reader, describeTables): _*).complete(buffer, cursor, candidates)
+      new StringsCompleter(keyNames(reader): _*).complete(buffer, cursor, candidates)
     }
   }
 
-  def apply(reader: ConsoleReader, showTables: => Try[TableNames], describeTable: String => Try[TableDescription]) = {
+  def apply(
+    reader: ConsoleReader,
+    showTables: => Try[TableNames],
+    tableCache: TableCache
+  ) = {
     val tableNames = new TableNamesCompleter(showTables)
+    val fields = new FieldsCompleter(reader, tableCache)
 
     new AggregateCompleter(
       new ArgumentCompleter(
@@ -93,15 +106,18 @@ object Completer {
         literal("*"),
         literal("from"),
         tableNames,
+        //TODO: branch here literal("asc", "desc", "limit"),
         literal("where"),
-        new FieldsCompleter(reader, describeTable),
-        //literal("asc", "desc", "limit"),
+        fields,
         Null
       ),
       new ArgumentCompleter(
         literal("update"),
         tableNames,
         literal("set"),
+        fields,
+        literal("where"),
+        //fields,
         Null
       ),
       new ArgumentCompleter(
@@ -113,7 +129,8 @@ object Completer {
       new ArgumentCompleter(
         literal("insert"),
         literal("into"),
-        tableNames,
+        tableNames, //TODO: fields completer, irgnoring commas and parens
+        //literal("values"),
         Null
       ),
       new ArgumentCompleter(

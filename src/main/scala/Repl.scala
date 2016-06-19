@@ -15,10 +15,25 @@ import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
+import dynamite.Completer.TableCache
+import dynamite.Response.Timed
 import fansi._
 import jline.internal.Ansi
 
 import scala.util.{ Failure, Success, Try }
+
+class Lazy[A](value: => A) {
+  var accessed = false
+  private[this] lazy val _value = {
+    accessed = true
+    value
+  }
+  def apply() = _value
+}
+
+object Lazy {
+  def apply[A](value: => A) = new Lazy(value)
+}
 
 object Repl {
 
@@ -52,12 +67,13 @@ object Repl {
         Eval(client).run(query) match {
           case Success(results) =>
             (query, results) match {
-              case (select: Ast.Select, Response.ResultSet(pages)) =>
+              case (select: Ast.Select, Response.ResultSet(pages, capacity)) =>
                 // paginate through the results, exiting at the first failure and printing as each page is processed
                 var result: Either[String, Unit] = Right(())
                 var first = true
                 while (result.isRight && pages.hasNext) {
-                  pages.next match {
+                  val Timed(value, _) = pages.next
+                  value match {
                     case Success(values) =>
                       val output = opts.render match {
                         case Format.Tabular =>
@@ -99,15 +115,17 @@ object Repl {
   }
 
   sealed trait Paging[A] {
-    def pageData: Iterator[Try[List[A]]]
+    def pageData: Iterator[Timed[Try[List[A]]]]
   }
 
   final class TablePaging(
     val select: Ast.Select,
-    val pageData: Iterator[Try[List[Item]]]
+    val pageData: Iterator[Timed[Try[List[Item]]]]
   ) extends Paging[Item]
 
-  final class TableNamePaging(val pageData: Iterator[Try[List[String]]]) extends Paging[String]
+  final class TableNamePaging(
+    val pageData: Iterator[Timed[Try[List[String]]]]
+  ) extends Paging[String]
 
   //TODO: when projecting all fields, show hash/sort keys first?
   def render(
@@ -174,21 +192,13 @@ object Repl {
 
     val out = new PrintWriter(reader.getOutput)
 
-    class Lazy[A](value: => A) {
-      var accessed = false
-      private[this] lazy val _value = {
-        accessed = true
-        value
-      }
-      def apply() = _value
-    }
-
     val client = new Lazy({
       dynamoClient(opts.endpoint)
     })
     lazy val eval = Eval(client())
 
-    reader.addCompleter(Completer(reader, eval.showTables, eval.describeTable))
+    val tableCache = new TableCache(Lazy(eval.describeTable))
+    reader.addCompleter(Completer(reader, eval.showTables, tableCache))
 
     // To increase repl start time, the client is initialize lazily. This save .5 second, which is
     // instead felt by the user when making the first query
@@ -229,12 +239,14 @@ object Repl {
         reader.setEchoCharacter(new Character(0))
 
         def handle[A, B](paging: Paging[A])(process: List[A] => B) = {
-          paging.pageData.next match {
+          val Timed(value, duration) = paging.pageData.next
+          value match {
             case Success(values) =>
               //TODO: if results is less than page size, finish early?
               if (values.nonEmpty) {
                 process(values)
               }
+              out.println(s"Completed in ${duration.toMillis} ms")
               if (!paging.pageData.hasNext) {
                 resetPagination()
               }
@@ -270,11 +282,20 @@ object Repl {
     }
 
     def report(query: Ast.Query, results: Response) = (query, results) match {
-      case (select: Ast.Select, Response.ResultSet(resultSet)) =>
+      case (select: Ast.Select, Response.ResultSet(resultSet, capacity)) =>
         // TODO: completion: success/failure, time, result count, indicate empty?
         //TODO: add flag with query cost
         paging = new TablePaging(select, resultSet)
         nextPage()
+        capacity.flatMap(value => Option(value())).foreach { cap =>
+          println(
+            s"""${cap.getCapacityUnits}
+               |${cap.getTable}
+               |${cap.getTableName}
+               |${cap.getGlobalSecondaryIndexes}
+               |${cap.getLocalSecondaryIndexes}""".stripMargin
+          )
+        }
       case (update: Ast.Update, Response.Complete) =>
       //TODO: output for update / delete /ddl
       case (ShowTables, Response.TableNames(resultSet)) =>
@@ -311,7 +332,10 @@ object Repl {
             .fold(failure => out.println(parseError(stripped, failure)), { query =>
               eval(query) match {
                 case Success(results) => report(query, results)
-                case Failure(ex) => formatError(ex.getMessage)
+                case Failure(ex) =>
+                  val msg = Option(ex.getMessage).getOrElse("An unknown error occurred")
+                  ex.printStackTrace()
+                  out.println(formatError(msg))
               }
             })
           ("", true)

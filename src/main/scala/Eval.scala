@@ -4,10 +4,11 @@ import dynamite.Ast.{ PrimaryKey => _, _ }
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
-import com.amazonaws.services.dynamodbv2.model.{ KeyType, ResourceNotFoundException }
+import com.amazonaws.services.dynamodbv2.model.{ ConsumedCapacity, KeyType, ResourceNotFoundException, ReturnConsumedCapacity }
 import java.util.{ Iterator => JIterator }
-
+import scala.concurrent.duration._
 import scala.collection.JavaConverters._
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Failure, Success, Try }
 
 class RecoveringIterator[A, B](
@@ -30,8 +31,23 @@ object Eval {
 
 sealed abstract class Response
 object Response {
-  final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
-  final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
+  final case class Timed[A] private (result: A, duration: FiniteDuration)
+
+  object Timed {
+    def apply[A](f: => A): Timed[A] = {
+      val before = System.nanoTime
+      val result = f
+      val after = System.nanoTime
+      Timed(result, (after - before).nanos)
+    }
+  }
+
+  final case class ResultSet(
+    results: Iterator[Timed[Try[List[Item]]]],
+    capacity: Option[() => ConsumedCapacity] = None
+  ) extends Response
+
+  final case class TableNames(names: Iterator[Timed[Try[List[String]]]]) extends Response
 
   case class PrimaryKey(name: String)
 
@@ -80,7 +96,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   def showTables(): Try[TableNames] = Try {
     val it = dynamo.listTables().pages().iterator()
     TableNames(new RecoveringIterator(it).map {
-      _.map(_.asScala.toList.map(_.getTableName))
+      value => Timed(value.map(_.asScala.toList.map(_.getTableName)))
     })
   }
 
@@ -152,10 +168,10 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   class TableIterator[A](
       select: Select,
       original: JIterator[Page[Item, A]]
-  ) extends Iterator[Try[List[Item]]] {
+  ) extends Iterator[Timed[Try[List[Item]]]] {
     private[this] val recovering = new RecoveringIterator(original)
 
-    def next() = {
+    def next() = Timed {
       val result = recovering.next().map(_.asScala.toList)
       handleFailure(select.from, result)
     }
@@ -164,9 +180,12 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   }
 
   def select(query: Select): Try[ResultSet] = Try {
-    def render[A](results: ItemCollection[A]) = {
+    def wrap[A](results: ItemCollection[A]) = {
       val original = results.pages().iterator()
-      new TableIterator(query, original)
+      ResultSet(
+        new TableIterator(query, original),
+        Some(() => results.getAccumulatedConsumedCapacity)
+      )
     }
 
     //TODO: handle pagination - use withMaxPageSize instead?
@@ -180,7 +199,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     val table = dynamo.getTable(query.from)
 
     //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
-    val result = query.where match {
+    query.where match {
       case Some(
         Ast.PrimaryKey(Ast.Key(hashKey, hashValue),
           Some(Ast.Key(sortKey, sortValue)))
@@ -195,11 +214,13 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
           sortKey,
           unwrap(sortValue)
         )
-        val result = table.getItem(withFields)
-        Iterator(Success(Option(result).toList))
+        ResultSet(Iterator(
+          Timed(Try(Option(table.getItem(withFields)).toList))
+        ))
 
       case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
         val spec = new QuerySpec()
+          .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
         val withFields = query.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
@@ -210,7 +231,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
           .withHashKey(key, unwrap(value))
           .withMaxPageSize(pageSize)
           .withScanIndexForward(scanForward(query.direction))
-        render(table.query(withLimit))
+        wrap(table.query(withLimit))
 
       case None =>
         //TODO: scan doesn't support order (because doesn't on hash key?)
@@ -223,10 +244,8 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
           limit => withFields.withMaxResultSize(limit)
         }
           .withMaxPageSize(pageSize)
-        render(table.scan(withLimit))
+        wrap(table.scan(withLimit))
     }
-
-    ResultSet(result)
   }
 
 }
