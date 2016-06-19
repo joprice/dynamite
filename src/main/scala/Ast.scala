@@ -1,8 +1,5 @@
 package dynamite
 
-import java.io.Serializable
-
-//TODO: value type
 object Ast {
 
   sealed abstract class Query extends Product with Serializable
@@ -32,6 +29,8 @@ object Ast {
   ) extends Query
 
   case object ShowTables extends Query
+
+  case class DescribeTable(table: String) extends Query
 
   sealed abstract class Direction extends Product with Serializable
   case object Ascending extends Direction

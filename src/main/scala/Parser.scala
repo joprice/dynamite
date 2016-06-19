@@ -106,17 +106,19 @@ object Parser {
         Insert(table, pairs)
     }
 
+  val describeTable = P("describe" ~ spaces ~ "table" ~ spaces ~ ident).map(DescribeTable(_))
+
   val showTables = P("show" ~ spaces ~ "tables").map(_ => ShowTables)
 
   val query = P(spaces.? ~ (
-    update | select | delete | insert | showTables
+    update | select | delete | insert | showTables | describeTable
   ) ~ spaces.? ~ End)
 
   def apply(input: String): Either[Parsed.Failure, Query] = {
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     import fastparse.core.Parsed.{ Failure, Success }
     query.parse(input) match {
-      case Success(query, _) => Right(query)
+      case Success(value, _) => Right(value)
       case failure: Failure => Left(failure)
     }
   }

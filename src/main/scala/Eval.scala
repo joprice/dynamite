@@ -1,11 +1,12 @@
 package dynamite
 
-import dynamite.Ast._
+import dynamite.Ast.{ PrimaryKey => _, _ }
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
-import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
+import com.amazonaws.services.dynamodbv2.model.{ KeyType, ResourceNotFoundException }
 import java.util.{ Iterator => JIterator }
+
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
 
@@ -28,9 +29,20 @@ object Eval {
 }
 
 sealed abstract class Response
-final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
-final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
-case object Complete extends Response
+object Response {
+  final case class ResultSet(results: Iterator[Try[List[Item]]]) extends Response
+  final case class TableNames(names: Iterator[Try[List[String]]]) extends Response
+
+  case class PrimaryKey(name: String)
+
+  final case class TableDescription(
+    name: String,
+    key: Option[(String, Option[String])]
+  ) extends Response
+  case object Complete extends Response
+}
+
+import Response._
 
 class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
@@ -41,6 +53,28 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     case delete: Delete => runDelete(delete)
     case insert: Insert => runInsert(insert)
     case ShowTables => showTables()
+    case DescribeTable(table) => describeTable(table)
+  }
+
+  def describeTable(tableName: String): Try[TableDescription] = Try {
+    val description = table(tableName).describe()
+    //    description.getAttributeDefinitions
+    //    description.getCreationDateTime
+    //    description.getGlobalSecondaryIndexes
+    //    description.getLocalSecondaryIndexes
+    //    description.getTableStatus
+    //    description.getTableSizeBytes
+    //    description.getProvisionedThroughput
+    val elements = description.getKeySchema.asScala
+    val key = for {
+      hash <- elements.find(_.getKeyType == KeyType.HASH.toString)
+    } yield {
+      val range = elements.find(_.getKeyType == KeyType.RANGE.toString)
+      (hash.getAttributeName, range.map(_.getAttributeName))
+    }
+    //(s"${element.getAttributeName}${element.getKeyType}")
+    //description.getItemCount
+    TableDescription(tableName, key)
   }
 
   def showTables(): Try[TableNames] = Try {
