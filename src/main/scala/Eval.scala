@@ -48,10 +48,10 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
-    case select: Select => runSelect(select)
-    case update: Update => runUpdate(update)
-    case delete: Delete => runDelete(delete)
-    case insert: Insert => runInsert(insert)
+    case query: Select => select(query)
+    case query: Update => update(query)
+    case query: Delete => delete(query)
+    case query: Insert => insert(query)
     case ShowTables => showTables()
     case DescribeTable(table) => describeTable(table)
   }
@@ -84,9 +84,9 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     })
   }
 
-  def runInsert(insert: Insert): Try[Complete.type] = Try {
-    table(insert.table).putItem(
-      insert.values.foldLeft(new Item()) {
+  def insert(query: Insert): Try[Complete.type] = Try {
+    table(query.table).putItem(
+      query.values.foldLeft(new Item()) {
         case (item, (field, value)) => item.`with`(field, unwrap(value))
       }
     )
@@ -94,8 +94,8 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   }
 
   //TODO: condition expression that item must exist?
-  def runDelete(delete: Delete): Try[Complete.type] = Try {
-    table(delete.table).deleteItem(toDynamoKey(delete.key))
+  def delete(query: Delete): Try[Complete.type] = Try {
+    table(query.table).deleteItem(toDynamoKey(query.key))
     Complete
     //TODO: optionally return consumed capacity
     //.getConsumedCapacity
@@ -118,10 +118,10 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   }
 
   //TODO: change response to more informative type
-  def runUpdate(update: Update): Try[Complete.type] = {
-    handleFailure(update.table, Try {
-      val table = dynamo.getTable(update.table)
-      val Ast.PrimaryKey(hash, range) = update.key
+  def update(query: Update): Try[Complete.type] = {
+    handleFailure(query.table, Try {
+      val table = dynamo.getTable(query.table)
+      val Ast.PrimaryKey(hash, range) = query.key
       val baseSpec = new UpdateItemSpec()
 
       val spec = range.fold(
@@ -133,7 +133,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
             hash.field,
             unwrap(hash.value)
           )
-        }.withAttributeUpdate(update.fields.map {
+        }.withAttributeUpdate(query.fields.map {
           case (key, value) => new AttributeUpdate(key).put(unwrap(value))
         }: _*)
       // TODO: id must exist condition
@@ -163,10 +163,10 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     def hasNext = recovering.hasNext
   }
 
-  def runSelect(select: Select): Try[ResultSet] = Try {
+  def select(query: Select): Try[ResultSet] = Try {
     def render[A](results: ItemCollection[A]) = {
       val original = results.pages().iterator()
-      new TableIterator(select, original)
+      new TableIterator(query, original)
     }
 
     //TODO: handle pagination - use withMaxPageSize instead?
@@ -177,16 +177,16 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     }
 
     //TODO: what to do when field does not exist on object?
-    val table = dynamo.getTable(select.from)
+    val table = dynamo.getTable(query.from)
 
     //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
-    val result = select.where match {
+    val result = query.where match {
       case Some(
         Ast.PrimaryKey(Ast.Key(hashKey, hashValue),
           Some(Ast.Key(sortKey, sortValue)))
         ) =>
         val spec = new GetItemSpec()
-        val withFields = (select.projection match {
+        val withFields = (query.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
         }).withPrimaryKey(
@@ -200,26 +200,26 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
       case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
         val spec = new QuerySpec()
-        val withFields = select.projection match {
+        val withFields = query.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
         }
-        val withLimit = select.limit.fold(withFields) {
+        val withLimit = query.limit.fold(withFields) {
           limit => withFields.withMaxResultSize(limit)
         }
           .withHashKey(key, unwrap(value))
           .withMaxPageSize(pageSize)
-          .withScanIndexForward(scanForward(select.direction))
+          .withScanIndexForward(scanForward(query.direction))
         render(table.query(withLimit))
 
       case None =>
         //TODO: scan doesn't support order (because doesn't on hash key?)
         val spec = new ScanSpec()
-        val withFields = select.projection match {
+        val withFields = query.projection match {
           case All => spec
           case Fields(fields) => spec.withAttributesToGet(fields: _*)
         }
-        val withLimit = select.limit.fold(withFields) {
+        val withLimit = query.limit.fold(withFields) {
           limit => withFields.withMaxResultSize(limit)
         }
           .withMaxPageSize(pageSize)
