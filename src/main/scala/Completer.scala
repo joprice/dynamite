@@ -80,9 +80,8 @@ object Completer {
         case _ => None
       }
     }.fold(Seq.empty[String]) { name =>
-      tableCache.get(name).map {
-        case TableDescription(_, Some((hash, range)), _) =>
-          Seq(hash) ++ range.toSeq
+      tableCache.get(name).map { desc =>
+        (desc.hash +: desc.range.toSeq).map(_.name)
       }.getOrElse(Seq.empty)
     }
 

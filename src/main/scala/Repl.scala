@@ -273,13 +273,6 @@ object Repl {
     }
 
     def printTableDescription(description: Response.TableDescription) = {
-      val headers = Seq("name", "hash", "range")
-
-      val data = Str(description.name) +: description.key.map {
-        case (hash, range) =>
-          Seq(hash, range.getOrElse("")).map(Str(_))
-      }.getOrElse(Seq.fill[Str](headers.size - 1)(""))
-
       def heading(str: String) = Bold.On(Color.LightCyan(Str(str)))
 
       def renderType(tpe: ScalarAttributeType) = tpe match {
@@ -289,11 +282,24 @@ object Repl {
       }
 
       def renderSchema(key: KeySchema) =
-        Str(s"${key.name} (${renderType(key.`type`)})")
+        Str(s"${key.name} [${Color.LightMagenta(renderType(key.`type`))}]")
+
+      val headers = Seq("name", "hash", "range")
 
       //TODO: change to one println?
       val output = s"""${heading("schema")}
-      |${Table(headers, Seq(data))}
+      |${
+        Table(
+          headers,
+          Seq(
+            Seq(
+              Str(description.name),
+              renderSchema(description.hash),
+              description.range.fold(Str(""))(renderSchema)
+            )
+          )
+        )
+      }
       |${heading("indexes")}
       |${
         Table(

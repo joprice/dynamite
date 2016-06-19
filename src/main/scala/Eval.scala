@@ -59,7 +59,8 @@ object Response {
 
   final case class TableDescription(
     name: String,
-    key: Option[(String, Option[String])],
+    hash: KeySchema,
+    range: Option[KeySchema],
     indexes: Seq[Index]
   ) extends Response
 
@@ -126,17 +127,11 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     val schemas = (globalIndexes ++ localIndexes)
       .flatMap { case (name, keys) => indexSchema(name, keys) }
 
-    val key = {
-      val elements = description.getKeySchema.asScala
-      for {
-        hash <- getKey(elements, KeyType.HASH)
-      } yield {
-        val range = getKey(elements, KeyType.RANGE)
-        (hash.getAttributeName, range.map(_.getAttributeName))
-      }
-    }
+    val elements = description.getKeySchema.asScala
+    val key = keySchema(elements, KeyType.HASH)
+    val range = keySchema(elements, KeyType.RANGE)
 
-    TableDescription(tableName, key, schemas)
+    TableDescription(tableName, key.get, range, schemas)
   }
 
   def showTables(): Try[TableNames] = Try {
