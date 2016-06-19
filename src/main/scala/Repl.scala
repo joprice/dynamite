@@ -2,7 +2,6 @@ package dynamite
 
 import java.io.{ File, PrintWriter, StringWriter }
 import java.util.stream.Collectors
-
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
@@ -11,30 +10,15 @@ import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import fastparse.core.Parsed
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
-
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
 import dynamite.Completer.TableCache
-import dynamite.Response.{ KeySchema, Timed }
+import dynamite.Response.KeySchema
 import fansi._
 import jline.internal.Ansi
-
 import scala.util.{ Failure, Success, Try }
-
-class Lazy[A](value: => A) {
-  var accessed = false
-  private[this] lazy val _value = {
-    accessed = true
-    value
-  }
-  def apply() = _value
-}
-
-object Lazy {
-  def apply[A](value: => A) = new Lazy(value)
-}
 
 object Repl {
 

@@ -46,7 +46,7 @@ class EvalSpec
   def run(query: String) = eval.run(Parser(query).right.get).get
 
   def runQuery(query: String) = {
-    val Response.ResultSet(result) = run(query)
+    val Response.ResultSet(result, _) = run(query)
     result
   }
 
@@ -56,7 +56,7 @@ class EvalSpec
 
   def validate(query: String, expected: List[List[JsValue]]) = {
     val result = runQuery(query)
-    val json = result.toList.map(_.get.map(item => Json.parse(item.toJSON)))
+    val json = result.toList.map(_.result.get.map(item => Json.parse(item.toJSON)))
     json should be(expected)
   }
 

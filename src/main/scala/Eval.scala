@@ -14,66 +14,10 @@ import java.util.{ Iterator => JIterator }
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{ Failure, Success, Try }
-
-class RecoveringIterator[A, B](
-    original: JIterator[Page[A, B]]
-) extends Iterator[Try[JIterator[A]]] {
-  private[this] var failed = false
-
-  def next() = {
-    val result = Try(original.next.iterator())
-    failed = result.isFailure
-    result
-  }
-
-  def hasNext = !failed && original.hasNext
-}
+import scala.util.{ Failure, Try }
 
 object Eval {
   def apply[A](client: AmazonDynamoDB) = new Eval(client)
-}
-
-sealed abstract class Response
-object Response {
-  final case class Timed[A] private (result: A, duration: FiniteDuration)
-
-  object Timed {
-    def apply[A](f: => A): Timed[A] = {
-      val before = System.nanoTime
-      val result = f
-      val after = System.nanoTime
-      Timed(result, (after - before).nanos)
-    }
-  }
-
-  final case class ResultSet(
-    results: Iterator[Timed[Try[List[Item]]]],
-    capacity: Option[() => ConsumedCapacity] = None
-  ) extends Response
-
-  final case class TableNames(names: Iterator[Timed[Try[List[String]]]])
-    extends Response
-
-  case class PrimaryKey(name: String)
-
-  final case class TableDescription(
-    name: String,
-    hash: KeySchema,
-    range: Option[KeySchema],
-    indexes: Seq[Index]
-  ) extends Response
-
-  case object Complete extends Response
-
-  final case class KeySchema(name: String, `type`: ScalarAttributeType)
-
-  final case class Index(
-    name: String,
-    hash: KeySchema,
-    range: Option[KeySchema]
-  )
-
 }
 
 import Response._
