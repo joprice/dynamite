@@ -5,7 +5,7 @@ buildInfoPackage := "dynamite"
 
 scalaVersion := "2.11.8"
 
-version := "0.0.9"
+version := "0.0.10"
 
 mainClass in Compile := Some("dynamite.Repl")
 

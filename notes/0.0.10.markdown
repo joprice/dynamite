@@ -1,0 +1,4 @@
+* add prototype autocompletion
+* add indexes and types to `describe table` output
+* show query execution time
+
