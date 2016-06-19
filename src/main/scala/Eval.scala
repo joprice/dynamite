@@ -2,10 +2,15 @@ package dynamite
 
 import dynamite.Ast.{ PrimaryKey => _, _ }
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, _ }
+import com.amazonaws.services.dynamodbv2.document.{
+  PrimaryKey => DynamoPrimaryKey,
+  Index => _,
+  _
+}
 import com.amazonaws.services.dynamodbv2.document.spec._
-import com.amazonaws.services.dynamodbv2.model.{ ConsumedCapacity, KeyType, ResourceNotFoundException, ReturnConsumedCapacity }
+import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
 import java.util.{ Iterator => JIterator }
+
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.FiniteDuration
@@ -47,15 +52,27 @@ object Response {
     capacity: Option[() => ConsumedCapacity] = None
   ) extends Response
 
-  final case class TableNames(names: Iterator[Timed[Try[List[String]]]]) extends Response
+  final case class TableNames(names: Iterator[Timed[Try[List[String]]]])
+    extends Response
 
   case class PrimaryKey(name: String)
 
   final case class TableDescription(
     name: String,
-    key: Option[(String, Option[String])]
+    key: Option[(String, Option[String])],
+    indexes: Seq[Index]
   ) extends Response
+
   case object Complete extends Response
+
+  final case class KeySchema(name: String, `type`: ScalarAttributeType)
+
+  final case class Index(
+    name: String,
+    hash: KeySchema,
+    range: Option[KeySchema]
+  )
+
 }
 
 import Response._
@@ -74,23 +91,52 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   def describeTable(tableName: String): Try[TableDescription] = Try {
     val description = table(tableName).describe()
-    //    description.getAttributeDefinitions
-    //    description.getCreationDateTime
-    //    description.getGlobalSecondaryIndexes
-    //    description.getLocalSecondaryIndexes
-    //    description.getTableStatus
-    //    description.getTableSizeBytes
-    //    description.getProvisionedThroughput
-    val elements = description.getKeySchema.asScala
-    val key = for {
-      hash <- elements.find(_.getKeyType == KeyType.HASH.toString)
-    } yield {
-      val range = elements.find(_.getKeyType == KeyType.RANGE.toString)
-      (hash.getAttributeName, range.map(_.getAttributeName))
+    val attributes = description.getAttributeDefinitions.asScala.map { definition =>
+      definition.getAttributeName -> definition.getAttributeType
+    }.toMap
+
+    def getKey(elements: Seq[KeySchemaElement], keyType: KeyType) =
+      elements.find(_.getKeyType == keyType.toString)
+
+    def keySchema(elements: Seq[KeySchemaElement], keyType: KeyType) = for {
+      key <- getKey(elements, keyType)
+      name = key.getAttributeName
+      tpe <- attributes.get(name)
+    } yield KeySchema(name, ScalarAttributeType.fromValue(tpe))
+
+    def indexSchema(name: String, elements: Seq[KeySchemaElement]) =
+      for {
+        hash <- keySchema(elements, KeyType.HASH)
+      } yield {
+        Index(name, hash, keySchema(elements, KeyType.RANGE))
+      }
+
+    // even Local and Global secondary index descriptors have almost the same structure,
+    // they do not share a common interface, so this code is repeated twice
+
+    val globalIndexes = Option(description.getGlobalSecondaryIndexes).map(_.asScala.map {
+      index => (index.getIndexName, index.getKeySchema.asScala)
+    }).getOrElse(Seq.empty)
+
+    val localIndexes = Option(description.getLocalSecondaryIndexes).map(_.asScala.map {
+      //TODO: get projection as well for autocompletion?
+      index => (index.getIndexName, index.getKeySchema.asScala)
+    }).getOrElse(Seq.empty)
+
+    val schemas = (globalIndexes ++ localIndexes)
+      .flatMap { case (name, keys) => indexSchema(name, keys) }
+
+    val key = {
+      val elements = description.getKeySchema.asScala
+      for {
+        hash <- getKey(elements, KeyType.HASH)
+      } yield {
+        val range = getKey(elements, KeyType.RANGE)
+        (hash.getAttributeName, range.map(_.getAttributeName))
+      }
     }
-    //(s"${element.getAttributeName}${element.getKeyType}")
-    //description.getItemCount
-    TableDescription(tableName, key)
+
+    TableDescription(tableName, key, schemas)
   }
 
   def showTables(): Try[TableNames] = Try {
@@ -204,6 +250,8 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
         Ast.PrimaryKey(Ast.Key(hashKey, hashValue),
           Some(Ast.Key(sortKey, sortValue)))
         ) =>
+        describeTable(query.from)
+
         val spec = new GetItemSpec()
         val withFields = (query.projection match {
           case All => spec

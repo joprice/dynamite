@@ -81,7 +81,7 @@ object Completer {
       }
     }.fold(Seq.empty[String]) { name =>
       tableCache.get(name).map {
-        case TableDescription(_, Some((hash, range))) =>
+        case TableDescription(_, Some((hash, range)), _) =>
           Seq(hash) ++ range.toSeq
       }.getOrElse(Seq.empty)
     }

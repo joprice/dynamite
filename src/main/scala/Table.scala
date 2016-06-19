@@ -1,11 +1,22 @@
 package dynamite
 
-import java.io.PrintWriter
-import fansi.Str
+import java.io.{ PrintWriter, StringWriter }
+
+import fansi.{ Bold, Color, Str }
 
 object Table {
-  def apply(out: PrintWriter, rows: Seq[Seq[Str]]) = {
-    val colCount = rows(0).size
+  def apply(headers: Seq[String], data: Seq[Seq[Str]]): String = {
+    val str = new StringWriter()
+    val out = new PrintWriter(str)
+    apply(
+      out,
+      headers.map(header => Bold.On(Str(header))) +: data
+    )
+    str.toString
+  }
+
+  def apply(out: PrintWriter, rows: Seq[Seq[Str]]): Unit = {
+    val colCount = rows.head.size
     val maxes = new Array[Int](colCount)
     val rowCount = rows.size
 

@@ -7,6 +7,7 @@ import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
 import com.amazonaws.services.dynamodbv2.document.Item
+import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import fastparse.core.Parsed
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
@@ -16,7 +17,7 @@ import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
 import dynamite.Completer.TableCache
-import dynamite.Response.Timed
+import dynamite.Response.{ KeySchema, Timed }
 import fansi._
 import jline.internal.Ansi
 
@@ -273,12 +274,41 @@ object Repl {
 
     def printTableDescription(description: Response.TableDescription) = {
       val headers = Seq("name", "hash", "range")
-        .map(header => Bold.On(Str(header)))
-      val data: Seq[Str] = Str(description.name) +: description.key.map {
+
+      val data = Str(description.name) +: description.key.map {
         case (hash, range) =>
           Seq(hash, range.getOrElse("")).map(Str(_))
-      }.getOrElse(Seq.empty[Str])
-      Table(out, Seq(headers, data))
+      }.getOrElse(Seq.fill[Str](headers.size - 1)(""))
+
+      def heading(str: String) = Bold.On(Color.LightCyan(Str(str)))
+
+      def renderType(tpe: ScalarAttributeType) = tpe match {
+        case ScalarAttributeType.B => "binary"
+        case ScalarAttributeType.N => "number"
+        case ScalarAttributeType.S => "string"
+      }
+
+      def renderSchema(key: KeySchema) =
+        Str(s"${key.name} (${renderType(key.`type`)})")
+
+      //TODO: change to one println?
+      val output = s"""${heading("schema")}
+      |${Table(headers, Seq(data))}
+      |${heading("indexes")}
+      |${
+        Table(
+          headers,
+          description.indexes.map { index =>
+            Seq(
+              Str(index.name),
+              renderSchema(index.hash),
+              index.range.fold(Str(""))(renderSchema)
+            )
+          }
+        )
+      }""".stripMargin
+
+      out.println(output)
     }
 
     def report(query: Ast.Query, results: Response) = (query, results) match {
