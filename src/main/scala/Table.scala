@@ -1,8 +1,7 @@
 package dynamite
 
 import java.io.{ PrintWriter, StringWriter }
-
-import fansi.{ Bold, Color, Str }
+import fansi.{ Bold, Str }
 
 object Table {
   def apply(headers: Seq[String], data: Seq[Seq[Str]]): String = {
