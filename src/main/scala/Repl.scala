@@ -136,16 +136,13 @@ object Repl {
         header => Str(data.get(header).map(_.toString).getOrElse(""))
       }
     }
-    val rows = if (withHeaders) {
-      headers.map(header => Bold.On(Str(header))) +: body
-    } else body
     if (align) {
       val writer = new StringWriter()
       val out = new PrintWriter(writer)
-      Table(out, rows)
+      out.println(Table(if (withHeaders) headers else Seq.empty, body))
       writer.toString
     } else {
-      rows
+      (headers +: body)
         .map(row => row.mkString("\t"))
         .mkString("\n")
     }
@@ -248,9 +245,8 @@ object Repl {
             }
           case paging: TableNamePaging =>
             handle(paging) { values =>
-              val headers = Seq(Bold.On(Str("name")))
-              //TODO: move headers into table
-              Table(out, headers +: values.map(name => Seq(Str(name))))
+              val headers = Seq("name")
+              out.println(Table(headers, values.map(name => Seq(Str(name)))))
             }
         }
       }

@@ -8,14 +8,9 @@ object Table {
   def apply(headers: Seq[String], data: Seq[Seq[Str]]): String = {
     val str = new StringWriter()
     val out = new PrintWriter(str)
-    apply(
-      out,
-      headers.map(header => Bold.On(Str(header))) +: data
-    )
-    str.toString
-  }
 
-  def apply(out: PrintWriter, rows: Seq[Seq[Str]]): Unit = {
+    val rows = headers.map(header => Bold.On(Str(header))) +: data
+
     val colCount = rows.head.size
     val maxes = new Array[Int](colCount)
     val rowCount = rows.size
@@ -38,7 +33,10 @@ object Table {
           out.print(padded)
           out.print("\t")
       }
-      out.println
+      out.println()
     }
+
+    str.toString
   }
+
 }

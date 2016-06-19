@@ -56,7 +56,8 @@ class EvalSpec
 
   def validate(query: String, expected: List[List[JsValue]]) = {
     val result = runQuery(query)
-    val json = result.toList.map(_.result.get.map(item => Json.parse(item.toJSON)))
+    val json = result.toList
+      .map(_.result.get.map(item => Json.parse(item.toJSON)))
     json should be(expected)
   }
 
