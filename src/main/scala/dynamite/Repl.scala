@@ -19,26 +19,6 @@ import dynamite.Response.KeySchema
 import fansi._
 import scala.util.{ Failure, Success, Try }
 
-trait Reader {
-  def disableEcho(): Unit
-  def enableEcho(): Unit
-  def clearPrompt(): Unit
-  def resetPrompt(): Unit
-  def readCharacter(): Int
-  def readLine(): String
-  def setPrompt(prompt: String): Unit
-}
-
-class JLineReader(reader: ConsoleReader) extends Reader {
-  def disableEcho(): Unit = reader.setEchoCharacter(new Character(0))
-  def enableEcho(): Unit = reader.setEchoCharacter(null)
-  def clearPrompt(): Unit = reader.setPrompt("")
-  def resetPrompt(): Unit = Repl.resetPrompt(reader)
-  def readCharacter(): Int = reader.readCharacter()
-  def readLine(): String = reader.readLine()
-  def setPrompt(prompt: String): Unit = reader.setPrompt(prompt)
-}
-
 class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
   import Repl._
 
@@ -68,6 +48,8 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
             out.println(s"Completed in ${duration.toMillis} ms")
             if (!paging.pageData.hasNext) {
               resetPagination()
+            } else {
+              out.println("Press q to quit, any key to load next page.")
             }
           //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
           case Failure(ex) =>
@@ -168,6 +150,7 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
     val line = if (inPager) {
       reader.readCharacter().toChar.toString
     } else reader.readLine()
+
     if (line != null) {
       val trimmed = line.trim
       val (updated, continue) = if (inPager) {
@@ -177,7 +160,7 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
         else
           nextPage()
         ("", true)
-      } else if (trimmed == "quit") {
+      } else if (trimmed.matches("exit *;?")) {
         ("", false)
       } else if (trimmed.contains(";")) {
         reader.resetPrompt()

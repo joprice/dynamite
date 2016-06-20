@@ -4,7 +4,8 @@ import scopt.Read
 
 case class Opts(
   endpoint: Option[String] = None,
-  render: Format = Format.Tabular
+  render: Format = Format.Tabular,
+  script: Option[String] = None
 )
 
 object Opts {
@@ -20,6 +21,10 @@ object Opts {
 
     opt[Format]("format").action { (render, config) =>
       config.copy(render = render)
+    }
+
+    opt[String]("script").action { (script, config) =>
+      config.copy(script = Some(script))
     }
   }
 }
