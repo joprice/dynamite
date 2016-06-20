@@ -46,7 +46,13 @@ dql> delete from playlists where userId = 1 and id = 10
 ### Show tables
 
 ```sql
-dql> show tables
+dql> show tables;
+```
+
+### Describe table
+
+```sql
+dql> describe table playlists;
 ```
 
 ## Scripting

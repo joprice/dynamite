@@ -19,7 +19,7 @@ import Response._
 
 case class AmbiguousIndexException(indexes: Seq[String]) extends Exception(
   s"""Multiple indexes can fulfill the query: ${indexes.mkString("[", ", ", "]")}.
-      |Choose an index explicitly by using a 'use index' clause.""".stripMargin
+      |Choose an index explicitly with a 'use index' clause.""".stripMargin
 )
 
 class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
