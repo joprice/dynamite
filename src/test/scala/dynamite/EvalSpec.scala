@@ -9,25 +9,28 @@ import play.api.libs.json.{ JsValue, Json }
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 
-class EvalSpec
-    extends FlatSpec
-    with Matchers
-    with BeforeAndAfterAll
-    with BeforeAndAfterEach {
-
-  case class User(name: String)
-
+trait DynamoTestClient {
   val dynamoPortKey = "dynamodb.local.port"
 
   val dynamoPort = sys.props.get(dynamoPortKey).getOrElse {
     throw new Exception(s"Failed to find $dynamoPortKey")
   }
 
-  val config = new ClientConfiguration()
+  lazy val config = new ClientConfiguration()
     .withConnectionTimeout(1.second.toMillis.toInt)
     .withSocketTimeout(1.second.toMillis.toInt)
-  val client = new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
+  lazy val client = new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
     .withEndpoint[AmazonDynamoDBClient](s"http://localhost:$dynamoPort")
+}
+
+class EvalSpec
+    extends FlatSpec
+    with Matchers
+    with BeforeAndAfterAll
+    with BeforeAndAfterEach
+    with DynamoTestClient {
+
+  case class User(name: String)
 
   Seed.createTable(client)
 
@@ -65,8 +68,8 @@ class EvalSpec
     validate("select id, name from playlists", List(List(
       Json.obj("id" -> 1, "name" -> "Chill Times"),
       Json.obj("id" -> 2, "name" -> "EDM4LYFE"),
-      Json.obj("id" -> 1, "name" -> "Disco Fever"),
-      Json.obj("id" -> 1, "name" -> "Top Pop")
+      Json.obj("id" -> 3, "name" -> "Disco Fever"),
+      Json.obj("id" -> 4, "name" -> "Top Pop")
     )))
   }
 
@@ -151,4 +154,23 @@ class EvalSpec
       ))
     )
   }
+
+  it should "use an index when available" in {
+    def result = runQuery("select id from playlists where userId = 'user-id-1' and duration = 10")
+    an[AmbiguousIndexException] should be thrownBy result
+  }
+
+  it should "use an explicit index when provided" in {
+    validate("select id from playlists where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only", List(List(
+      Json.obj("id" -> 2),
+      Json.obj("id" -> 1)
+    )))
+  }
+
+  //  it should "use an index when unambiguous" in {
+  //    validate("select id from playlists where userId = 'user-id-1' and duration = 10", List(List(
+  //      Json.obj("id" -> 2),
+  //      Json.obj("id" -> 1)
+  //    )))
+  //  }
 }

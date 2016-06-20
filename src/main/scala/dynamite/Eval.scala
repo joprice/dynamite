@@ -2,14 +2,11 @@ package dynamite
 
 import dynamite.Ast.{ PrimaryKey => _, _ }
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.amazonaws.services.dynamodbv2.document.{
-  PrimaryKey => DynamoPrimaryKey,
-  Index => _,
-  _
-}
+import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
 import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
 import java.util.{ Iterator => JIterator }
+
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Try }
@@ -19,6 +16,11 @@ object Eval {
 }
 
 import Response._
+
+case class AmbiguousIndexException(indexes: Seq[String]) extends Exception(
+  s"""Multiple indexes can fulfill the query: ${indexes.mkString("[", ", ", "]")}.
+      |Choose an index explicitly by using a 'use index' clause.""".stripMargin
+)
 
 class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
@@ -181,44 +183,59 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     //TODO: what to do when field does not exist on object?
     val table = dynamo.getTable(query.from)
 
+    def querySpec() = {
+      val spec = new QuerySpec()
+        .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
+      val withFields = query.projection match {
+        case All => spec
+        case Fields(fields) => spec.withAttributesToGet(fields: _*)
+      }
+      query.limit.fold(withFields) {
+        limit => withFields.withMaxResultSize(limit)
+      }
+        .withMaxPageSize(pageSize)
+        .withScanIndexForward(scanForward(query.direction))
+    }
+
     //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
     query.where match {
-      case Some(
-        Ast.PrimaryKey(
-          Ast.Key(hashKey, hashValue),
-          Some(Ast.Key(sortKey, sortValue))
-          )
-        ) =>
-        val spec = new GetItemSpec()
-        val withFields = (query.projection match {
-          case All => spec
-          case Fields(fields) => spec.withAttributesToGet(fields: _*)
-        }).withPrimaryKey(
-          hashKey,
-          unwrap(hashValue),
-          sortKey,
-          unwrap(sortValue)
-        )
-        //val indexName = ""
-        //table.getIndex(indexName).query
-        ResultSet(Iterator(
-          Timed(Try(Option(table.getItem(withFields)).toList))
-        ))
+      case Some(Ast.PrimaryKey(Ast.Key(hashKey, hashValue), Some(Ast.Key(sortKey, sortValue)))) =>
+        val grouped = describeTable(query.from).get.indexes.groupBy { index =>
+          (index.hash.name, index.range.map(_.name))
+        }.mapValues(_.map(_.name))
+
+        //TODO: check types as well?
+        query.useIndex.orElse(
+          grouped.get(hashKey -> Some(sortKey)).map {
+            case Seq(indexName) => indexName
+            case indexes => throw new AmbiguousIndexException(indexes)
+          }
+        ).map { indexName =>
+            val spec = querySpec()
+              .withHashKey(hashKey, unwrap(hashValue))
+              .withRangeKeyCondition(
+                new RangeKeyCondition(sortKey).eq(unwrap(sortValue))
+              )
+            wrap(table.getIndex(indexName).query(spec))
+          }.getOrElse {
+            val spec = new GetItemSpec()
+            val withFields = (query.projection match {
+              case All => spec
+              case Fields(fields) => spec.withAttributesToGet(fields: _*)
+            }).withPrimaryKey(
+              hashKey,
+              unwrap(hashValue),
+              sortKey,
+              unwrap(sortValue)
+            )
+            ResultSet(Iterator(
+              Timed(Try(Option(table.getItem(withFields)).toList))
+            ))
+          }
 
       case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
-        val spec = new QuerySpec()
-          .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
-        val withFields = query.projection match {
-          case All => spec
-          case Fields(fields) => spec.withAttributesToGet(fields: _*)
-        }
-        val withLimit = query.limit.fold(withFields) {
-          limit => withFields.withMaxResultSize(limit)
-        }
-          .withHashKey(key, unwrap(value))
-          .withMaxPageSize(pageSize)
-          .withScanIndexForward(scanForward(query.direction))
-        wrap(table.query(withLimit))
+        val spec = querySpec().withHashKey(key, unwrap(value))
+        wrap(table.query(spec))
 
       case None =>
         //TODO: scan doesn't support order (because doesn't on hash key?)

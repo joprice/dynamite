@@ -9,7 +9,8 @@ object Ast {
     from: String,
     where: Option[PrimaryKey] = None,
     direction: Option[Direction] = None,
-    limit: Option[Int] = None
+    limit: Option[Int] = None,
+    useIndex: Option[String] = None
   ) extends Query
 
   final case class Update(

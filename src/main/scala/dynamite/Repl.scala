@@ -1,7 +1,7 @@
 package dynamite
 
 import java.io.{ File, PrintWriter, StringWriter }
-import java.util.stream.Collectors
+
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
@@ -17,40 +17,249 @@ import dynamite.Ast._
 import dynamite.Completer.TableCache
 import dynamite.Response.KeySchema
 import fansi._
-import jline.internal.Ansi
 import scala.util.{ Failure, Success, Try }
+
+trait Reader {
+  def disableEcho(): Unit
+  def enableEcho(): Unit
+  def clearPrompt(): Unit
+  def resetPrompt(): Unit
+  def readCharacter(): Int
+  def readLine(): String
+  def setPrompt(prompt: String): Unit
+}
+
+class JLineReader(reader: ConsoleReader) extends Reader {
+  def disableEcho(): Unit = reader.setEchoCharacter(new Character(0))
+  def enableEcho(): Unit = reader.setEchoCharacter(null)
+  def clearPrompt(): Unit = reader.setPrompt("")
+  def resetPrompt(): Unit = Repl.resetPrompt(reader)
+  def readCharacter(): Int = reader.readCharacter()
+  def readLine(): String = reader.readLine()
+  def setPrompt(prompt: String): Unit = reader.setPrompt(prompt)
+}
+
+class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
+  import Repl._
+
+  var paging: Paging[_] = null
+
+  def inPager = paging != null
+
+  def resetPagination() = {
+    paging = null
+    reader.enableEcho()
+    reader.resetPrompt()
+  }
+
+  def nextPage() = {
+    if (paging.pageData.hasNext) {
+      reader.clearPrompt()
+      reader.disableEcho()
+
+      def handle[A, B](paging: Paging[A])(process: List[A] => B) = {
+        val Timed(value, duration) = paging.pageData.next
+        value match {
+          case Success(values) =>
+            //TODO: if results is less than page size, finish early?
+            if (values.nonEmpty) {
+              process(values)
+            }
+            out.println(s"Completed in ${duration.toMillis} ms")
+            if (!paging.pageData.hasNext) {
+              resetPagination()
+            }
+          //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
+          case Failure(ex) =>
+            resetPagination()
+            //ex.printStackTrace()
+            //println(s"$ex ${ex.getClass} ${ex.getCause}")
+            out.println(formatError(ex.getMessage))
+        }
+      }
+
+      paging match {
+        case paging: TablePaging =>
+          handle(paging) { values =>
+            out.print(render(values, paging.select.projection))
+          }
+        case paging: TableNamePaging =>
+          handle(paging) { values =>
+            val headers = Seq("name")
+            out.println(Table(headers, values.map(name => Seq(Str(name)))))
+          }
+      }
+    }
+  }
+
+  def printTableDescription(description: Response.TableDescription) = {
+    def heading(str: String) = Bold.On(Color.LightCyan(Str(str)))
+
+    def renderType(tpe: ScalarAttributeType) = tpe match {
+      case ScalarAttributeType.B => "binary"
+      case ScalarAttributeType.N => "number"
+      case ScalarAttributeType.S => "string"
+    }
+
+    def renderSchema(key: KeySchema) =
+      Str(s"${key.name} [${Color.LightMagenta(renderType(key.`type`))}]")
+
+    val headers = Seq("name", "hash", "range")
+    val output =
+      s"""${heading("schema")}
+      |${
+        Table(
+          headers,
+          Seq(
+            Seq(
+              Str(description.name),
+              renderSchema(description.hash),
+              description.range.fold(Str(""))(renderSchema)
+            )
+          )
+        )
+      }
+    |${heading("indexes")}
+    |${
+        Table(
+          headers,
+          description.indexes.map { index =>
+            Seq(
+              Str(index.name),
+              renderSchema(index.hash),
+              index.range.fold(Str(""))(renderSchema)
+            )
+          }
+        )
+      }""".stripMargin
+
+    out.println(output)
+  }
+
+  def report(query: Ast.Query, results: Response) = (query, results) match {
+    case (select: Ast.Select, Response.ResultSet(resultSet, capacity)) =>
+      // TODO: completion: success/failure, time, result count, indicate empty?
+      //TODO: add flag with query cost
+      paging = new TablePaging(select, resultSet)
+      nextPage()
+    //      capacity.flatMap(value => Option(value())).foreach { cap =>
+    //        println(
+    //          s"""${cap.getCapacityUnits}
+    //               |${cap.getTable}
+    //               |${cap.getTableName}
+    //               |${cap.getGlobalSecondaryIndexes}
+    //               |${cap.getLocalSecondaryIndexes}""".stripMargin
+    //        )
+    //      }
+    case (update: Ast.Update, Response.Complete) =>
+    //TODO: output for update / delete /ddl
+    case (ShowTables, Response.TableNames(resultSet)) =>
+      paging = new TableNamePaging(resultSet)
+      nextPage()
+    case (_: DescribeTable, description: Response.TableDescription) =>
+      printTableDescription(description)
+    case unhandled =>
+      out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
+  }
+
+  @tailrec final def loop(buffer: String): Unit = {
+    // While paging, a single char is read so that a new line is not required to
+    // go the next page, or quit the pager
+    val line = if (inPager) {
+      reader.readCharacter().toChar.toString
+    } else reader.readLine()
+    if (line != null) {
+      val trimmed = line.trim
+      val (updated, continue) = if (inPager) {
+        // q is used to quit pagination
+        if (trimmed == "q")
+          resetPagination()
+        else
+          nextPage()
+        ("", true)
+      } else if (trimmed == "quit") {
+        ("", false)
+      } else if (trimmed.contains(";")) {
+        reader.resetPrompt()
+        //TODO: switch to either with custom error type for console output
+        val stripped = s"$buffer\n${line.stripSuffix(";")}"
+        Parser(stripped)
+          .fold(failure => out.println(parseError(stripped, failure)), { query =>
+            eval(query) match {
+              case Success(results) => report(query, results)
+              case Failure(ex) =>
+                val msg = Option(ex.getMessage).getOrElse("An unknown error occurred")
+                out.println(formatError(msg))
+            }
+          })
+        ("", true)
+      } else {
+        reader.setPrompt(Bold.On(Str("  -> ")).render)
+        (s"$buffer\n$line", true)
+      }
+      out.flush()
+      if (continue) {
+        loop(updated)
+      }
+    }
+  }
+
+  def run() = loop("")
+
+}
 
 object Repl {
 
-  def apply(opts: Opts) = {
-    println(s"${Opts.appName} v${BuildInfo.version}")
-    val reader = new ConsoleReader()
-    val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
-    reader.setHistory(history)
-    resetPrompt(reader)
-    reader.setExpandEvents(false)
-
-    val out = new PrintWriter(reader.getOutput)
-
+  def apply(opts: Opts): Unit = {
     val client = new Lazy({
       dynamoClient(opts.endpoint)
     })
-    lazy val eval = Eval(client())
+    apply(client)
+  }
 
-    val tableCache = new TableCache(Lazy(eval.describeTable))
-    reader.addCompleter(Completer(reader, eval.showTables, tableCache))
+  def apply(client: Lazy[AmazonDynamoDBClient]): Unit = {
+    println(s"${Opts.appName} v${BuildInfo.version}")
 
-    // To increase repl start time, the client is initialize lazily. This save .5 second, which is
-    // instead felt by the user when making the first query
-    def run(query: Ast.Query) = eval.run(query)
+    withReader(new ConsoleReader) { reader =>
+      //TODO: switch to save history in .dql folder instead?
+      val file = new File(sys.props("user.home"), ".dql-history")
+      withFileHistory(file, reader) {
+        resetPrompt(reader)
+        reader.setExpandEvents(false)
 
-    loop(run, reader, out)
+        lazy val eval = Eval(client())
 
-    if (client.accessed) {
-      client().shutdown()
+        val tableCache = new TableCache(Lazy(eval.describeTable))
+        reader.addCompleter(Completer(reader, eval.showTables, tableCache))
+
+        // To increase repl start time, the client is initialize lazily. This save .5 second, which is
+        // instead felt by the user when making the first query
+        def run(query: Ast.Query) = eval.run(query)
+
+        val out = new PrintWriter(reader.getOutput)
+        new Repl(run, new JLineReader(reader), out).run()
+
+        if (client.accessed) {
+          client().shutdown()
+        }
+      }
     }
-    history.flush()
-    reader.shutdown()
+  }
+
+  def withReader[A](reader: ConsoleReader)(f: ConsoleReader => A) = {
+    try f(reader) finally {
+      reader.shutdown()
+    }
+  }
+
+  def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
+    val history = new FileHistory(file)
+    reader.setHistory(history)
+    try {
+      f
+    } finally {
+      history.flush()
+    }
   }
 
   def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
@@ -140,173 +349,6 @@ object Repl {
   }
 
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
-
-  def loop(eval: Ast.Query => Try[Response], reader: ConsoleReader, out: PrintWriter) = {
-    var paging: Paging[_] = null
-
-    def inPager = paging != null
-
-    def resetPagination() = {
-      paging = null
-      reader.setEchoCharacter(null)
-      resetPrompt(reader)
-    }
-
-    def nextPage() = {
-      if (paging.pageData.hasNext) {
-        reader.setPrompt("")
-        reader.setEchoCharacter(new Character(0))
-
-        def handle[A, B](paging: Paging[A])(process: List[A] => B) = {
-          val Timed(value, duration) = paging.pageData.next
-          value match {
-            case Success(values) =>
-              //TODO: if results is less than page size, finish early?
-              if (values.nonEmpty) {
-                process(values)
-              }
-              out.println(s"Completed in ${duration.toMillis} ms")
-              if (!paging.pageData.hasNext) {
-                resetPagination()
-              }
-            //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
-            case Failure(ex) =>
-              resetPagination()
-              //ex.printStackTrace()
-              //println(s"$ex ${ex.getClass} ${ex.getCause}")
-              out.println(formatError(ex.getMessage))
-          }
-        }
-
-        paging match {
-          case paging: TablePaging =>
-            handle(paging) { values =>
-              out.print(render(values, paging.select.projection))
-            }
-          case paging: TableNamePaging =>
-            handle(paging) { values =>
-              val headers = Seq("name")
-              out.println(Table(headers, values.map(name => Seq(Str(name)))))
-            }
-        }
-      }
-    }
-
-    def printTableDescription(description: Response.TableDescription) = {
-      def heading(str: String) = Bold.On(Color.LightCyan(Str(str)))
-
-      def renderType(tpe: ScalarAttributeType) = tpe match {
-        case ScalarAttributeType.B => "binary"
-        case ScalarAttributeType.N => "number"
-        case ScalarAttributeType.S => "string"
-      }
-
-      def renderSchema(key: KeySchema) =
-        Str(s"${key.name} [${Color.LightMagenta(renderType(key.`type`))}]")
-
-      val headers = Seq("name", "hash", "range")
-
-      //TODO: change to one println?
-      val output = s"""${heading("schema")}
-      |${
-        Table(
-          headers,
-          Seq(
-            Seq(
-              Str(description.name),
-              renderSchema(description.hash),
-              description.range.fold(Str(""))(renderSchema)
-            )
-          )
-        )
-      }
-      |${heading("indexes")}
-      |${
-        Table(
-          headers,
-          description.indexes.map { index =>
-            Seq(
-              Str(index.name),
-              renderSchema(index.hash),
-              index.range.fold(Str(""))(renderSchema)
-            )
-          }
-        )
-      }""".stripMargin
-
-      out.println(output)
-    }
-
-    def report(query: Ast.Query, results: Response) = (query, results) match {
-      case (select: Ast.Select, Response.ResultSet(resultSet, capacity)) =>
-        // TODO: completion: success/failure, time, result count, indicate empty?
-        //TODO: add flag with query cost
-        paging = new TablePaging(select, resultSet)
-        nextPage()
-        capacity.flatMap(value => Option(value())).foreach { cap =>
-          println(
-            s"""${cap.getCapacityUnits}
-               |${cap.getTable}
-               |${cap.getTableName}
-               |${cap.getGlobalSecondaryIndexes}
-               |${cap.getLocalSecondaryIndexes}""".stripMargin
-          )
-        }
-      case (update: Ast.Update, Response.Complete) =>
-      //TODO: output for update / delete /ddl
-      case (ShowTables, Response.TableNames(resultSet)) =>
-        paging = new TableNamePaging(resultSet)
-        nextPage()
-      case (_: DescribeTable, description: Response.TableDescription) =>
-        printTableDescription(description)
-      case unhandled =>
-        out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
-    }
-
-    @tailrec def repl(buffer: String): Unit = {
-      // While paging, a single char is read so that a new line is not required to
-      // go the next page, or quit the pager
-      val line = if (inPager) {
-        reader.readCharacter().toChar.toString
-      } else reader.readLine()
-      if (line != null) {
-        val trimmed = line.trim
-        val (updated, continue) = if (inPager) {
-          // q is used to quit pagination
-          if (trimmed == "q")
-            resetPagination()
-          else
-            nextPage()
-          ("", true)
-        } else if (trimmed == "quit") {
-          ("", false)
-        } else if (trimmed.contains(";")) {
-          resetPrompt(reader)
-          //TODO: switch to either with custom error type for console output
-          val stripped = s"$buffer\n${line.stripSuffix(";")}"
-          Parser(stripped)
-            .fold(failure => out.println(parseError(stripped, failure)), { query =>
-              eval(query) match {
-                case Success(results) => report(query, results)
-                case Failure(ex) =>
-                  val msg = Option(ex.getMessage).getOrElse("An unknown error occurred")
-                  out.println(formatError(msg))
-              }
-            })
-          ("", true)
-        } else {
-          reader.setPrompt(Bold.On(Str("  -> ")).render)
-          (s"$buffer\n$line", true)
-        }
-        out.flush()
-        if (continue) {
-          repl(updated)
-        }
-      }
-    }
-
-    repl("")
-  }
 
 }
 

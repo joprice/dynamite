@@ -279,5 +279,12 @@ class ParserSpec extends FlatSpec with Matchers {
       )
     )
   }
+
+  it should "allow an explicit index to be used" in {
+    validate(
+      "select * from playlists use index playlist-length-keys-only",
+      Select(All, "playlists", useIndex = Some("playlist-length-keys-only"))
+    )
+  }
 }
 

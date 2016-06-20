@@ -74,12 +74,15 @@ object Parser {
     "select" ~/ spaces ~ ("*".!.map(_ => All) | fields.map(Fields(_)))
   )
 
+  val useIndex = "use" ~ spaces ~ "index" ~ spaces ~ ident
+
   val select = P(
     projection ~ spaces ~
       from ~
       opt(primaryKey) ~
       opt(direction) ~
-      opt(limit)
+      opt(limit) ~
+      opt(useIndex)
   ).map((Select.apply _).tupled)
 
   val update = P(

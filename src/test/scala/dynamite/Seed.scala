@@ -22,11 +22,28 @@ object Seed {
         )
         .withAttributeDefinitions(
           new AttributeDefinition("userId", ScalarAttributeType.S),
-          new AttributeDefinition("id", ScalarAttributeType.N)
+          new AttributeDefinition("id", ScalarAttributeType.N),
+          new AttributeDefinition("duration", ScalarAttributeType.N)
         )
         .withKeySchema(
           new KeySchemaElement("userId", KeyType.HASH),
           new KeySchemaElement("id", KeyType.RANGE)
+        )
+        .withLocalSecondaryIndexes(
+          new LocalSecondaryIndex()
+            .withIndexName("playlist-length")
+            .withKeySchema(
+              new KeySchemaElement("userId", KeyType.HASH),
+              new KeySchemaElement("duration", KeyType.RANGE)
+            )
+            .withProjection(new Projection().withProjectionType(ProjectionType.ALL)),
+          new LocalSecondaryIndex()
+            .withIndexName("playlist-length-keys-only")
+            .withKeySchema(
+              new KeySchemaElement("userId", KeyType.HASH),
+              new KeySchemaElement("duration", KeyType.RANGE)
+            )
+            .withProjection(new Projection().withProjectionType(ProjectionType.KEYS_ONLY))
         )
     )
     TableUtils.waitUntilActive(client, tableName)
@@ -37,25 +54,29 @@ object Seed {
       "userId" -> "user-id-1",
       "id" -> 1,
       "name" -> "Chill Times",
-      "dateCreated" -> 1
+      "dateCreated" -> 1,
+      "duration" -> 10
     ),
     Json.obj(
       "userId" -> "user-id-1",
       "id" -> 2,
       "name" -> "EDM4LYFE",
-      "dateCreated" -> 2
+      "dateCreated" -> 2,
+      "duration" -> 10
     ),
     Json.obj(
       "userId" -> "user-id-2",
-      "id" -> 1,
+      "id" -> 3,
       "name" -> "Disco Fever",
-      "dateCreated" -> 3
+      "dateCreated" -> 3,
+      "duration" -> 5
     ),
     Json.obj(
       "userId" -> "user-id-3",
-      "id" -> 1,
+      "id" -> 4,
       "name" -> "Top Pop",
-      "dateCreated" -> 4
+      "dateCreated" -> 4,
+      "duration" -> 1
     )
   )
 
