@@ -7,9 +7,13 @@ import scala.util.{ Failure, Success }
 
 object Script {
 
-  def apply(opts: Opts) = {
+  def apply(opts: Opts): Unit = {
     val input = Console.in.lines().collect(Collectors.joining("\n"))
-    val result = Parser(input).fold({ failure =>
+    apply(opts, input)
+  }
+
+  def apply(opts: Opts, input: String): Unit = {
+    val result = Parser(input.trim.stripSuffix(";")).fold({ failure =>
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, { query =>
       Repl.withClient(opts) { client =>
