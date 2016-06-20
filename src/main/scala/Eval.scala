@@ -10,10 +10,8 @@ import com.amazonaws.services.dynamodbv2.document.{
 import com.amazonaws.services.dynamodbv2.document.spec._
 import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
 import java.util.{ Iterator => JIterator }
-
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
-import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Failure, Try }
 
 object Eval {
@@ -145,7 +143,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   private def handleFailure[A](table: String, result: Try[A]) = {
     result.recoverWith {
-      case _: ResourceNotFoundException =>
+      case ex: ResourceNotFoundException =>
         Failure(new Exception(s"Table '$table' does not exist"))
     }
   }
@@ -186,11 +184,11 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
     query.where match {
       case Some(
-        Ast.PrimaryKey(Ast.Key(hashKey, hashValue),
-          Some(Ast.Key(sortKey, sortValue)))
+        Ast.PrimaryKey(
+          Ast.Key(hashKey, hashValue),
+          Some(Ast.Key(sortKey, sortValue))
+          )
         ) =>
-        describeTable(query.from)
-
         val spec = new GetItemSpec()
         val withFields = (query.projection match {
           case All => spec
@@ -201,6 +199,8 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
           sortKey,
           unwrap(sortValue)
         )
+        //val indexName = ""
+        //table.getIndex(indexName).query
         ResultSet(Iterator(
           Timed(Try(Option(table.getItem(withFields)).toList))
         ))

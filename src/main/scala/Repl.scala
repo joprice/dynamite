@@ -22,16 +22,35 @@ import scala.util.{ Failure, Success, Try }
 
 object Repl {
 
-  def main(args: Array[String]): Unit = {
-    Opts.parser.parse(args, Opts()) match {
-      case Some(config) =>
-        if (System.console() == null) {
-          runNonInteractive(config)
-        } else {
-          runInteractive(config)
-        }
-      case None =>
+  def apply(opts: Opts) = {
+    println(s"${Opts.appName} v${BuildInfo.version}")
+    val reader = new ConsoleReader()
+    val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
+    reader.setHistory(history)
+    resetPrompt(reader)
+    reader.setExpandEvents(false)
+
+    val out = new PrintWriter(reader.getOutput)
+
+    val client = new Lazy({
+      dynamoClient(opts.endpoint)
+    })
+    lazy val eval = Eval(client())
+
+    val tableCache = new TableCache(Lazy(eval.describeTable))
+    reader.addCompleter(Completer(reader, eval.showTables, tableCache))
+
+    // To increase repl start time, the client is initialize lazily. This save .5 second, which is
+    // instead felt by the user when making the first query
+    def run(query: Ast.Query) = eval.run(query)
+
+    loop(run, reader, out)
+
+    if (client.accessed) {
+      client().shutdown()
     }
+    history.flush()
+    reader.shutdown()
   }
 
   def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
@@ -40,62 +59,6 @@ object Repl {
       f(client)
     } finally {
       client.shutdown()
-    }
-  }
-
-  def runNonInteractive(opts: Opts) = {
-    val input = Console.in.lines().collect(Collectors.joining("\n"))
-    val result = Parser(input).fold({ failure =>
-      Left(Ansi.stripAnsi(parseError(input, failure)))
-    }, { query =>
-      withClient(opts) { client =>
-        Eval(client).run(query) match {
-          case Success(results) =>
-            (query, results) match {
-              case (select: Ast.Select, Response.ResultSet(pages, capacity)) =>
-                // paginate through the results, exiting at the first failure and printing as each page is processed
-                var result: Either[String, Unit] = Right(())
-                var first = true
-                while (result.isRight && pages.hasNext) {
-                  val Timed(value, _) = pages.next
-                  value match {
-                    case Success(values) =>
-                      val output = opts.render match {
-                        case Format.Tabular =>
-                          Ansi.stripAnsi(render(
-                            values,
-                            select.projection,
-                            withHeaders = first,
-                            align = false
-                          )).trim
-                        case Format.Json =>
-                          values.map(_.toJSON).mkString("\n")
-                        case Format.JsonPretty =>
-                          values.map(_.toJSONPretty).mkString("\n")
-                      }
-                      Console.out.println(output)
-                      first = false
-                    case Failure(ex) =>
-                      result = Left(ex.getMessage)
-                  }
-                }
-                result
-              //TODO: write
-              case (ShowTables, Response.TableNames(names)) =>
-                Console.out.println(names.mkString("\n"))
-                Right(())
-              //TODO: print update/delete success/failiure
-              case (DescribeTable(_), Response.TableNames(names)) => Right(())
-              case unhandled => Left(s"unhandled response $unhandled")
-            }
-          case Failure(ex) => Left(ex.getMessage)
-        }
-      }
-    })
-
-    result.left.foreach { reason =>
-      Console.err.println(reason)
-      sys.exit(1)
     }
   }
 
@@ -169,37 +132,6 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
-  def runInteractive(opts: Opts) = {
-    println(s"${Opts.appName} v${BuildInfo.version}")
-    val reader = new ConsoleReader()
-    val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
-    reader.setHistory(history)
-    resetPrompt(reader)
-    reader.setExpandEvents(false)
-
-    val out = new PrintWriter(reader.getOutput)
-
-    val client = new Lazy({
-      dynamoClient(opts.endpoint)
-    })
-    lazy val eval = Eval(client())
-
-    val tableCache = new TableCache(Lazy(eval.describeTable))
-    reader.addCompleter(Completer(reader, eval.showTables, tableCache))
-
-    // To increase repl start time, the client is initialize lazily. This save .5 second, which is
-    // instead felt by the user when making the first query
-    def run(query: Ast.Query) = eval.run(query)
-
-    loop(run, reader, out)
-
-    if (client.accessed) {
-      client().shutdown()
-    }
-    history.flush()
-    reader.shutdown()
-  }
-
   def parseError(line: String, failure: Parsed.Failure) = {
     //TODO: improve error output - use fastparse error
     s"""${formatError("Failed to parse query")}
@@ -237,8 +169,11 @@ object Repl {
               if (!paging.pageData.hasNext) {
                 resetPagination()
               }
+            //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
             case Failure(ex) =>
               resetPagination()
+              //ex.printStackTrace()
+              //println(s"$ex ${ex.getClass} ${ex.getCause}")
               out.println(formatError(ex.getMessage))
           }
         }
@@ -355,7 +290,6 @@ object Repl {
                 case Success(results) => report(query, results)
                 case Failure(ex) =>
                   val msg = Option(ex.getMessage).getOrElse("An unknown error occurred")
-                  ex.printStackTrace()
                   out.println(formatError(msg))
               }
             })

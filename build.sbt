@@ -7,7 +7,7 @@ scalaVersion := "2.11.8"
 
 version := "0.0.10"
 
-mainClass in Compile := Some("dynamite.Repl")
+mainClass in Compile := Some("dynamite.Main")
 
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "0.3.7",
