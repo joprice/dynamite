@@ -133,7 +133,12 @@ object Repl {
       val data = item.asMap.asScala
       // missing fields are represented by an empty str
       headers.map {
-        header => Str(data.get(header).map(_.toString).getOrElse(""))
+        header =>
+          Str(data.get(header).map {
+            // surround strings with quotes to differentiate them from ints
+            case s: String => s""""$s""""
+            case other => other.toString
+          }.getOrElse(""))
       }
     }
     if (align) {
@@ -165,7 +170,7 @@ object Repl {
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
   def runInteractive(opts: Opts) = {
-    println(s"${Opts.appName} ${BuildInfo.version}")
+    println(s"${Opts.appName} v${BuildInfo.version}")
     val reader = new ConsoleReader()
     val history = new FileHistory(new File(sys.props("user.home"), ".dql-history"))
     reader.setHistory(history)
@@ -241,7 +246,7 @@ object Repl {
         paging match {
           case paging: TablePaging =>
             handle(paging) { values =>
-              out.println(render(values, paging.select.projection))
+              out.print(render(values, paging.select.projection))
             }
           case paging: TableNamePaging =>
             handle(paging) { values =>

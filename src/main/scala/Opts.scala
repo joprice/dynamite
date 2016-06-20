@@ -24,6 +24,9 @@ object Opts {
   }
 }
 
+/**
+ * Rendering format for output in non-interactive
+ */
 sealed abstract class Format extends Product with Serializable
 
 object Format {
