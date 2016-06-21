@@ -3,6 +3,8 @@ package dynamite
 import jline.console.ConsoleReader
 
 trait Reader {
+  def terminalWidth: Int
+
   def disableEcho(): Unit
 
   def enableEcho(): Unit
@@ -32,4 +34,6 @@ class JLineReader(reader: ConsoleReader) extends Reader {
   def readLine(): String = reader.readLine()
 
   def setPrompt(prompt: String): Unit = reader.setPrompt(">")
+
+  def terminalWidth: Int = reader.getTerminal.getWidth
 }

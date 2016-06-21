@@ -12,6 +12,7 @@ class TestReader(line: String) extends Reader {
     )
   )
 
+  def terminalWidth = 100
   def enableEcho(): Unit = ()
   def clearPrompt(): Unit = ()
   def resetPrompt(): Unit = ()

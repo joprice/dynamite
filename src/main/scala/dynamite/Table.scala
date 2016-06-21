@@ -4,7 +4,11 @@ import java.io.{ PrintWriter, StringWriter }
 import fansi.{ Bold, Str }
 
 object Table {
-  def apply(headers: Seq[String], data: Seq[Seq[Str]]): String = {
+  def apply(
+    headers: Seq[String],
+    data: Seq[Seq[Str]],
+    width: Option[Int] = None
+  ): String = {
     val str = new StringWriter()
     val out = new PrintWriter(str)
 
@@ -24,15 +28,13 @@ object Table {
     }
 
     rows.foreach { row =>
-      row.zipWithIndex.foreach {
+      val output = row.zipWithIndex.map {
         case (col, i) =>
           val max = maxes(i)
           val size = col.length
-          val padded = if (size < max) col + (" " * (max - size)) else col
-          out.print(padded)
-          out.print("\t")
-      }
-      out.println()
+          if (size < max) col + (" " * (max - size)) else col
+      }.mkString("\t")
+      out.println(output)
     }
 
     str.toString

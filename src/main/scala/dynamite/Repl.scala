@@ -63,7 +63,8 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
       paging match {
         case paging: TablePaging =>
           handle(paging) { values =>
-            out.print(render(values, paging.select.projection))
+            out.print(render(values, paging.select.projection,
+              width = Some(reader.terminalWidth)))
           }
         case paging: TableNamePaging =>
           handle(paging) { values =>
@@ -272,7 +273,8 @@ object Repl {
     list: Seq[Item],
     select: Ast.Projection,
     withHeaders: Boolean = true,
-    align: Boolean = true
+    align: Boolean = true,
+    width: Option[Int] = None
   ): String = {
     val headers = select match {
       case All =>
@@ -287,19 +289,32 @@ object Repl {
     val body = list.map { item =>
       val data = item.asMap.asScala
       // missing fields are represented by an empty str
+      val maxColumnLength = 40
+      val ellipsis = "..."
+      def truncate(s: String) = {
+        if (s.length > maxColumnLength)
+          s.take(maxColumnLength - ellipsis.length) + ellipsis
+        else s
+      }
       headers.map {
         header =>
-          Str(data.get(header).map {
+          Str(truncate(data.get(header).map {
             // surround strings with quotes to differentiate them from ints
             case s: String => s""""$s""""
+            //case list: java.util.ArrayList =>
+            //  list.asScala.take(5).toString
             case other => other.toString
-          }.getOrElse(""))
+          }.getOrElse("")))
       }
     }
     if (align) {
       val writer = new StringWriter()
       val out = new PrintWriter(writer)
-      out.println(Table(if (withHeaders) headers else Seq.empty, body))
+      out.println(Table(
+        if (withHeaders) headers else Seq.empty,
+        body,
+        width
+      ))
       writer.toString
     } else {
       (headers +: body)
