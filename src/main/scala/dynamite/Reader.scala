@@ -18,6 +18,7 @@ trait Reader {
   def readLine(): String
 
   def setPrompt(prompt: String): Unit
+  
 }
 
 class JLineReader(reader: ConsoleReader) extends Reader {
@@ -33,7 +34,8 @@ class JLineReader(reader: ConsoleReader) extends Reader {
 
   def readLine(): String = reader.readLine()
 
-  def setPrompt(prompt: String): Unit = reader.setPrompt(">")
+  def setPrompt(prompt: String): Unit = reader.setPrompt(prompt)
 
   def terminalWidth: Int = reader.getTerminal.getWidth
+
 }
