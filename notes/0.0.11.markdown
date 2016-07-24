@@ -1,0 +1,6 @@
+* start truncating output
+* add '--script' parameter 
+* change "quit" to "exit" for exiting the terminal
+* automatically make use of unambiguous indexes in queries
+* allow index to be specified with `use index`
+* begin cleaning up repl code; move to tail-recursive loop
