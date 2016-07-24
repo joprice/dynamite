@@ -18,7 +18,7 @@ trait Reader {
   def readLine(): String
 
   def setPrompt(prompt: String): Unit
-  
+
 }
 
 class JLineReader(reader: ConsoleReader) extends Reader {
