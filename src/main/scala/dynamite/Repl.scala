@@ -278,8 +278,8 @@ object Repl {
   ): String = {
     val headers = select match {
       case All =>
-        list.headOption
-          .fold(Seq.empty[String])(_.asMap.asScala.keys.toSeq)
+        list.flatMap(_.asMap.asScala.keys)
+          .distinct
           .sorted
       case Ast.Fields(fields) => fields
     }
