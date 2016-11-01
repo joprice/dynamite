@@ -1,11 +1,10 @@
+import sbtrelease.ReleaseStateTransformations._
 
 enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
 scalaVersion := "2.11.8"
-
-version := "0.0.11"
 
 mainClass in Compile := Some("dynamite.Main")
 
@@ -53,5 +52,33 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ywarn-adapted-args", 
   "-Ywarn-inaccessible",
   "-Ywarn-dead-code"
+)
+
+lazy val checkVersionNotes = taskKey[Unit](
+	"Checks that the notes for the next version are present to avoid build failures."
+)
+
+checkVersionNotes := {
+  val notesFile = GithubRelease.notesDir.value / (version.value.stripSuffix("-SNAPSHOT") +".markdown")
+  val notesPath = notesFile.relativeTo(baseDirectory.value).getOrElse(notesFile)
+  if (!notesPath.exists) {
+    sys.error(s"Missing notes file $notesPath")
+  }
+}
+
+releaseProcess := Seq[ReleaseStep](
+  releaseStepTask(checkVersionNotes),
+  releaseStepTask(checkGithubCredentials),
+  checkSnapshotDependencies,
+  inquireVersions,
+  runClean,
+  runTest,
+  setReleaseVersion,
+  commitReleaseVersion,
+  releaseStepTask(releaseOnGithub),
+  //publishArtifacts,
+  setNextVersion,
+  commitNextVersion,
+  pushChanges
 )
 
