@@ -1,0 +1,2 @@
+* configure sbt-release
+* support fields not present in all results
