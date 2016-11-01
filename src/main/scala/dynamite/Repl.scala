@@ -339,7 +339,7 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
-  def parseError(line: String, failure: Parsed.Failure) = {
+  def parseError(line: String, failure: Parsed.Failure[_, _]) = {
     //TODO: improve error output - use fastparse error
     s"""${formatError("Failed to parse query")}
       |${Color.Red(line)}

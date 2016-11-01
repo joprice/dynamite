@@ -9,7 +9,7 @@ scalaVersion := "2.11.8"
 mainClass in Compile := Some("dynamite.Main")
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "fastparse" % "0.3.7",
+  "com.lihaoyi" %% "fastparse" % "0.4.2",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.8",
   "org.scalatest" %% "scalatest" % "2.2.6" % Test,
   "com.typesafe.play" %% "play-json" % "2.5.3" % Test,

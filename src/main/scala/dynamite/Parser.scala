@@ -122,7 +122,7 @@ object Parser {
     import fastparse.core.Parsed.{ Failure, Success }
     query.parse(input) match {
       case Success(value, _) => Right(value)
-      case failure: Failure => Left(failure)
+      case failure: Failure[_, _] => Left(failure)
     }
   }
 }
