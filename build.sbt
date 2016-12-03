@@ -1,4 +1,5 @@
 import sbtrelease.ReleaseStateTransformations._
+import ohnosequences.sbt.GithubRelease
 
 enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
@@ -36,11 +37,12 @@ dynamoDBLocalDownloadDir := baseDirectory.value / "dynamodb-local"
 
 SbtScalariform.scalariformSettings 
 
-GithubRelease.repo := "joprice/dynamite" 
+ghreleaseRepoOrg := "joprice"
+ghreleaseRepoName := "dynamite"
 
 //GithubRelease.draft := true
 
-GithubRelease.releaseAssets := Seq((packageBin in Universal).value)
+ghreleaseAssets := Seq((packageBin in Universal).value)
 
 scalacOptions in (Compile, compile) ++= Seq(
   "-encoding",
@@ -59,7 +61,7 @@ lazy val checkVersionNotes = taskKey[Unit](
 )
 
 checkVersionNotes := {
-  val notesFile = GithubRelease.notesDir.value / (version.value.stripSuffix("-SNAPSHOT") +".markdown")
+  val notesFile = baseDirectory.value / "notes" / (version.value.stripSuffix("-SNAPSHOT") +".markdown")
   val notesPath = notesFile.relativeTo(baseDirectory.value).getOrElse(notesFile)
   if (!notesPath.exists) {
     sys.error(s"Missing notes file $notesPath")
@@ -68,15 +70,18 @@ checkVersionNotes := {
 
 releaseProcess := Seq[ReleaseStep](
   releaseStepTask(checkVersionNotes),
-  releaseStepTask(checkGithubCredentials),
+  releaseStepTask(ghreleaseGetCredentials),
+  //releaseStepTask(ghreleaseGetRepo),
+  //releaseStepTask(ghreleaseGetReleaseBuilder),
   checkSnapshotDependencies,
   inquireVersions,
   runClean,
   runTest,
   setReleaseVersion,
   commitReleaseVersion,
-  releaseStepTask(releaseOnGithub),
-  publishArtifacts,
+  releaseStepInputTask(githubRelease, version.value),
+  //releaseStepTask(GithubRelease.defs.githubRelease(version.value)),
+  //publishArtifacts,
   setNextVersion,
   commitNextVersion,
   pushChanges
