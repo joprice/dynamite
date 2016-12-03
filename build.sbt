@@ -86,6 +86,7 @@ releaseProcess := Seq[ReleaseStep](
   runTest,
   setReleaseVersion,
   commitReleaseVersion,
+  tagRelease,
   releaseStepTask(releaseOnGithub),
   releaseStepInputTask(githubRelease, version.value),
   //releaseStepTask(GithubRelease.defs.githubRelease(version.value)),
