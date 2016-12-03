@@ -1,5 +1,6 @@
 import sbtrelease.ReleaseStateTransformations._
 import ohnosequences.sbt.GithubRelease
+import org.kohsuke.github.GHRelease
 
 enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
@@ -68,6 +69,12 @@ checkVersionNotes := {
   }
 }
 
+lazy val releaseOnGithub = taskKey[GHRelease]("Releases project on github")
+
+releaseOnGithub := Def.taskDyn {
+  GithubRelease.defs.githubRelease(version.value)
+}.value
+
 releaseProcess := Seq[ReleaseStep](
   releaseStepTask(checkVersionNotes),
   releaseStepTask(ghreleaseGetCredentials),
@@ -79,6 +86,7 @@ releaseProcess := Seq[ReleaseStep](
   runTest,
   setReleaseVersion,
   commitReleaseVersion,
+  releaseStepTask(releaseOnGithub),
   releaseStepInputTask(githubRelease, version.value),
   //releaseStepTask(GithubRelease.defs.githubRelease(version.value)),
   //publishArtifacts,
