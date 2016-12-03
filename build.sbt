@@ -72,7 +72,7 @@ checkVersionNotes := {
 lazy val releaseOnGithub = taskKey[GHRelease]("Releases project on github")
 
 releaseOnGithub := Def.taskDyn {
-  GithubRelease.defs.githubRelease(version.value)
+  GithubRelease.defs.githubRelease(s"v${version.value}")
 }.value
 
 releaseProcess := Seq[ReleaseStep](
