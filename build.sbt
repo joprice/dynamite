@@ -78,8 +78,6 @@ releaseOnGithub := Def.taskDyn {
 releaseProcess := Seq[ReleaseStep](
   releaseStepTask(checkVersionNotes),
   releaseStepTask(ghreleaseGetCredentials),
-  //releaseStepTask(ghreleaseGetRepo),
-  //releaseStepTask(ghreleaseGetReleaseBuilder),
   checkSnapshotDependencies,
   inquireVersions,
   runClean,
@@ -90,7 +88,6 @@ releaseProcess := Seq[ReleaseStep](
   // the new tag needs to be present on github before releasing
   pushChanges,
   releaseStepTask(releaseOnGithub),
-  //publishArtifacts,
   setNextVersion,
   commitNextVersion,
   pushChanges
