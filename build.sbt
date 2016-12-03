@@ -76,7 +76,7 @@ releaseProcess := Seq[ReleaseStep](
   setReleaseVersion,
   commitReleaseVersion,
   releaseStepTask(releaseOnGithub),
-  //publishArtifacts,
+  publishArtifacts,
   setNextVersion,
   commitNextVersion,
   pushChanges
