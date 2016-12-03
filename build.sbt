@@ -87,9 +87,9 @@ releaseProcess := Seq[ReleaseStep](
   setReleaseVersion,
   commitReleaseVersion,
   tagRelease,
+  // the new tag needs to be present on github before releasing
+  pushChanges,
   releaseStepTask(releaseOnGithub),
-  releaseStepInputTask(githubRelease, version.value),
-  //releaseStepTask(GithubRelease.defs.githubRelease(version.value)),
   //publishArtifacts,
   setNextVersion,
   commitNextVersion,
