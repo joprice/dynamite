@@ -5,18 +5,21 @@ import java.io.{ File, PrintWriter, StringWriter }
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
-import com.amazonaws.services.dynamodbv2.document.Item
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
-import fastparse.core.Parsed
+import com.fasterxml.jackson.databind.JsonNode
+import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
+
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
 import dynamite.Completer.TableCache
+import dynamite.Parser.{ ParseError, ParseException, UnAggregatedFieldsError }
 import dynamite.Response.KeySchema
 import fansi._
+
 import scala.util.{ Failure, Success, Try }
 
 class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
@@ -56,6 +59,7 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
             resetPagination()
             //ex.printStackTrace()
             //println(s"$ex ${ex.getClass} ${ex.getCause}")
+            //TODO: file error logger
             out.println(formatError(ex.getMessage))
         }
       }
@@ -194,14 +198,25 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
 
 object Repl {
 
+  def headers(select: Seq[Ast.Projection], data: Seq[JsonNode]): Seq[String] = {
+    select.flatMap {
+      case FieldSelector.All =>
+        data.flatMap(_.fieldNames().asScala)
+          .distinct
+          .sorted
+      case FieldSelector.Field(field) => Seq(field)
+      case count: Aggregate.Count.type => Seq(count.name)
+    }
+  }
+
   def apply(opts: Opts): Unit = {
     val client = new Lazy({
       dynamoClient(opts.endpoint)
     })
-    apply(client)
+    apply(client, pageSize = 20)
   }
 
-  def apply(client: Lazy[AmazonDynamoDBClient]): Unit = {
+  def apply(client: Lazy[AmazonDynamoDBClient], pageSize: Int): Unit = {
     println(s"${Opts.appName} v${BuildInfo.version}")
 
     withReader(new ConsoleReader) { reader =>
@@ -211,10 +226,10 @@ object Repl {
         resetPrompt(reader)
         reader.setExpandEvents(false)
 
-        lazy val eval = Eval(client())
+        lazy val eval = Eval(client(), pageSize)
 
         val tableCache = new TableCache(Lazy(eval.describeTable))
-        reader.addCompleter(Completer(reader, eval.showTables, tableCache))
+        reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
 
         // To increase repl start time, the client is initialize lazily. This save .5 second, which is
         // instead felt by the user when making the first query
@@ -231,9 +246,7 @@ object Repl {
   }
 
   def withReader[A](reader: ConsoleReader)(f: ConsoleReader => A) = {
-    try f(reader) finally {
-      reader.shutdown()
-    }
+    try f(reader) finally reader.close()
   }
 
   def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
@@ -253,6 +266,7 @@ object Repl {
     } finally {
       client.shutdown()
     }
+
   }
 
   sealed trait Paging[A] {
@@ -261,8 +275,8 @@ object Repl {
 
   final class TablePaging(
     val select: Ast.Select,
-    val pageData: Iterator[Timed[Try[List[Item]]]]
-  ) extends Paging[Item]
+    val pageData: Iterator[Timed[Try[List[JsonNode]]]]
+  ) extends Paging[JsonNode]
 
   final class TableNamePaging(
     val pageData: Iterator[Timed[Try[List[String]]]]
@@ -270,24 +284,21 @@ object Repl {
 
   //TODO: when projecting all fields, show hash/sort keys first?
   def render(
-    list: Seq[Item],
-    select: Ast.Projection,
+    list: Seq[JsonNode],
+    select: Seq[Ast.Projection],
     withHeaders: Boolean = true,
     align: Boolean = true,
     width: Option[Int] = None
   ): String = {
-    val headers = select match {
-      case All =>
-        list.flatMap(_.asMap.asScala.keys)
-          .distinct
-          .sorted
-      case Ast.Fields(fields) => fields
-    }
+    val headers = Repl.headers(select, list)
     //TODO: not all fields need the same names. If All was provided in the query,
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
     val body = list.map { item =>
-      val data = item.asMap.asScala
+      import scala.collection.breakOut
+      val data: Map[String, Any] = item.fields().asScala.toList.map { entry =>
+        (entry.getKey, entry.getValue)
+      }(breakOut)
       // missing fields are represented by an empty str
       val maxColumnLength = 40
       val ellipsis = "..."
@@ -339,11 +350,16 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
-  def parseError(line: String, failure: Parsed.Failure[_, _]) = {
-    //TODO: improve error output - use fastparse error
-    s"""${formatError("Failed to parse query")}
-      |${Color.Red(line)}
-      |${(" " * failure.index) + "^"}""".stripMargin
+  def parseError(line: String, failure: ParseException) = {
+    failure match {
+      case ParseError(error) =>
+        //TODO: improve error output - use fastparse error
+        s"""${formatError("Failed to parse query")}
+           |${Color.Red(line)}
+           |${(" " * error.index) + "^"}""".stripMargin
+      case error: UnAggregatedFieldsError =>
+        formatError(error.getMessage)
+    }
   }
 
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"

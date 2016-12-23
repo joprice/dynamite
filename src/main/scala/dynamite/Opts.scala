@@ -2,7 +2,7 @@ package dynamite
 
 import scopt.Read
 
-case class Opts(
+final case class Opts(
   endpoint: Option[String] = None,
   render: Format = Format.Tabular,
   script: Option[String] = None

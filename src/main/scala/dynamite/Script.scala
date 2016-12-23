@@ -17,7 +17,7 @@ object Script {
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, { query =>
       Repl.withClient(opts) { client =>
-        Eval(client).run(query) match {
+        Eval(client, pageSize = 20).run(query) match {
           case Success(results) =>
             (query, results) match {
               case (select: Ast.Select, Response.ResultSet(pages, capacity)) =>
@@ -37,9 +37,11 @@ object Script {
                             align = false
                           )).trim
                         case Format.Json =>
-                          values.map(_.toJSON).mkString("\n")
+                          values.map(_.toString).mkString("\n")
                         case Format.JsonPretty =>
-                          values.map(_.toJSONPretty).mkString("\n")
+                          //TODO: pretty print
+                          values.map(_.toString).mkString("\n")
+                        //values.map(_.toJSONPretty).mkString("\n")
                       }
                       Console.out.println(output)
                       first = false
@@ -48,7 +50,7 @@ object Script {
                   }
                 }
                 result
-              //TODO: write
+              //TODO: format output
               case (ShowTables, Response.TableNames(names)) =>
                 Console.out.println(names.mkString("\n"))
                 Right(())

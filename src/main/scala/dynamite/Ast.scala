@@ -5,7 +5,7 @@ object Ast {
   sealed abstract class Query extends Product with Serializable
 
   final case class Select(
-    projection: Projection,
+    projection: Seq[Projection],
     from: String,
     where: Option[PrimaryKey] = None,
     direction: Option[Direction] = None,
@@ -31,15 +31,30 @@ object Ast {
 
   case object ShowTables extends Query
 
-  case class DescribeTable(table: String) extends Query
+  final case class DescribeTable(table: String) extends Query
 
   sealed abstract class Direction extends Product with Serializable
   case object Ascending extends Direction
   case object Descending extends Direction
 
   sealed abstract class Projection extends Product with Serializable
-  final case class Fields(fields: Seq[String]) extends Projection
-  case object All extends Projection
+
+  object Projection {
+    sealed abstract class Aggregate(val name: String) extends Projection
+
+    object Aggregate {
+      //TODO: for now, field name is same as function, should add aliases
+      //TODO: for now, not accepting a projection. In the future arbitrary should be selected, which would sum non-null values
+      case object Count extends Aggregate("count")
+    }
+
+    sealed abstract class FieldSelector extends Projection
+
+    object FieldSelector {
+      final case class Field(name: String) extends FieldSelector
+      case object All extends FieldSelector
+    }
+  }
 
   sealed abstract class Value extends Product with Serializable
 

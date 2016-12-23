@@ -47,15 +47,15 @@ ghreleaseRepoName := "dynamite"
 ghreleaseAssets := Seq((packageBin in Universal).value)
 
 scalacOptions in (Compile, compile) ++= Seq(
-  "-encoding",
-  "UTF-8",
+  "-encoding", "UTF-8",
   "-deprecation", 
   "-feature", 
   "-unchecked", 
   "-Xlint", 
   "-Ywarn-adapted-args", 
   "-Ywarn-inaccessible",
-  "-Ywarn-dead-code"
+  "-Ywarn-dead-code",
+  "-Xfatal-warnings"
 )
 
 lazy val checkVersionNotes = taskKey[Unit](

@@ -1,28 +1,142 @@
 package dynamite
 
-import dynamite.Ast.{ PrimaryKey => _, _ }
+import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
+import dynamite.Ast.{ PrimaryKey => _, _ }
 import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
-import java.util.{ Iterator => JIterator }
+import com.amazonaws.util.json.Jackson
+import com.fasterxml.jackson.databind.JsonNode
+import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
+import dynamite.Response.ResultSet
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
-import scala.util.{ Failure, Try }
+import scala.util.{ Failure, Success, Try }
 
 object Eval {
-  def apply[A](client: AmazonDynamoDB) = new Eval(client)
+  def apply[A](client: AmazonDynamoDB, pageSize: Int) = new Eval(client, pageSize)
+
+  def jsonNode(item: Item) = Jackson.jsonNodeOf(item.toJSON)
+
+  //TODO: handle pagination - use withMaxPageSize instead?
+  def scanForward(dir: Option[Direction]) = dir match {
+    case Some(Ascending) => true
+    case Some(Descending) => false
+    case None => true
+  }
+
+  def toDynamoKey(key: Ast.PrimaryKey) = {
+    val Ast.PrimaryKey(hash, range) = key
+    def toAttr(key: Ast.Key) = new KeyAttribute(key.field, unwrap(key.value))
+    val attrs = toAttr(hash) +: range.map(toAttr).toSeq
+    new DynamoPrimaryKey(attrs: _*)
+  }
+
+  def unwrap(value: Value): AnyRef = value match {
+    case StringValue(value) => value
+    case number: NumberValue => number.value
+    case ListValue(value) => value.map(unwrap).asJava
+  }
+
+  def resolveProjection(projection: Seq[Ast.Projection]): (Seq[Aggregate], Seq[String]) = {
+    def loop(projection: Seq[Ast.Projection]): (Seq[Aggregate], Seq[String]) = {
+      val fields = projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
+        case (state, FieldSelector.All) => state
+        case ((aggregates, fields), FieldSelector.Field(field)) => (aggregates, fields :+ field)
+        case ((aggregates, fields), count: Aggregate.Count.type) => (aggregates :+ count, fields)
+      }
+      fields
+    }
+    //TODO: need to dedupe?
+    val (aggregates, fields) = loop(projection)
+    (aggregates, fields.distinct)
+  }
+
+  def applyAggregates(aggregates: Seq[Aggregate], resultSet: ResultSet): ResultSet = {
+    if (aggregates.nonEmpty) {
+      aggregates.head match {
+        case agg: Aggregate.Count.type =>
+          resultSet.copy(
+            results = LazySingleIterator {
+              val it = resultSet.results
+              var totalDuration = 0.seconds
+              var count = 0
+              var failure: Option[Throwable] = None
+              while (failure.isEmpty && it.hasNext) {
+                val Timed(result, duration) = it.next
+                result match {
+                  case Success(rows) =>
+                    count += rows.size
+                  case Failure(ex) => failure = Some(ex)
+                }
+                totalDuration += duration
+              }
+
+              Timed(
+                failure.map[Try[List[JsonNode]]] { ex =>
+                  Failure[List[JsonNode]](ex)
+                }.getOrElse {
+                  val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                  node.put(agg.name, count)
+                  Success(List(node))
+                }, totalDuration
+              )
+            }
+          )
+      }
+    } else resultSet
+  }
+
+  def recoverQuery[A](table: String, result: Try[A]) = {
+    result.recoverWith {
+      case ex: ResourceNotFoundException =>
+        Failure(new Exception(s"Table '$table' does not exist"))
+    }
+  }
+
+  final case class AmbiguousIndexException(indexes: Seq[String]) extends Exception(
+    s"""Multiple indexes can fulfill the query: ${indexes.mkString("[", ", ", "]")}.
+       |Choose an index explicitly with a 'use index' clause.""".stripMargin
+  )
+
+  object LazySingleIterator {
+    def apply[A](elem: => A) = new LazySingleIterator(elem)
+  }
+
+  class LazySingleIterator[A](elem: => A) extends Iterator[A] {
+    private[this] var _hasNext = true
+
+    def hasNext: Boolean = _hasNext
+
+    def next(): A =
+      if (_hasNext) {
+        _hasNext = false; elem
+      } else Iterator.empty.next()
+  }
+
+  class TableIterator[A](
+      select: Select,
+      original: Iterator[Iterator[JsonNode]]
+  ) extends Iterator[Timed[Try[List[JsonNode]]]] {
+    private[this] val recovering = new RecoveringIterator(original)
+
+    def next() = Timed {
+      val result = recovering.next().map(_.toList)
+      Eval.recoverQuery(select.from, result)
+    }
+
+    def hasNext = recovering.hasNext
+
+  }
 }
 
 import Response._
 
-case class AmbiguousIndexException(indexes: Seq[String]) extends Exception(
-  s"""Multiple indexes can fulfill the query: ${indexes.mkString("[", ", ", "]")}.
-      |Choose an index explicitly with a 'use index' clause.""".stripMargin
-)
+class Eval(client: AmazonDynamoDB, pageSize: Int) {
+  import Eval._
 
-class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
@@ -35,7 +149,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   }
 
   def describeTable(tableName: String): Try[TableDescription] = Try {
-    val description = table(tableName).describe()
+    val description = dynamo.getTable(tableName).describe()
     val attributes = description.getAttributeDefinitions.asScala.map { definition =>
       definition.getAttributeName -> definition.getAttributeType
     }.toMap
@@ -79,14 +193,16 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
   }
 
   def showTables(): Try[TableNames] = Try {
-    val it = dynamo.listTables().pages().iterator()
+    val it = dynamo.listTables().pages().iterator().asScala.map {
+      _.iterator().asScala
+    }
     TableNames(new RecoveringIterator(it).map {
-      value => Timed(value.map(_.asScala.toList.map(_.getTableName)))
+      value => Timed(value.map(_.toList.map(_.getTableName)))
     })
   }
 
   def insert(query: Insert): Try[Complete.type] = Try {
-    table(query.table).putItem(
+    dynamo.getTable(query.table).putItem(
       query.values.foldLeft(new Item()) {
         case (item, (field, value)) => item.`with`(field, unwrap(value))
       }
@@ -96,31 +212,15 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
 
   //TODO: condition expression that item must exist?
   def delete(query: Delete): Try[Complete.type] = Try {
-    table(query.table).deleteItem(toDynamoKey(query.key))
+    dynamo.getTable(query.table).deleteItem(toDynamoKey(query.key))
     Complete
     //TODO: optionally return consumed capacity
     //.getConsumedCapacity
   }
 
-  private def table(tableName: String) = dynamo.getTable(tableName)
-
-  private def unwrap(value: Value): AnyRef = value match {
-    case StringValue(value) => value
-    case number: NumberValue => number.value
-    case ListValue(value) => value.map(unwrap).asJava
-  }
-
-  def toDynamoKey(key: Ast.PrimaryKey) = {
-    val Ast.PrimaryKey(hash, range) = key
-    def toAttr(key: Ast.Key) = new KeyAttribute(key.field, unwrap(key.value))
-    val attrs = toAttr(key.hash) +: range.map(toAttr).toSeq
-    new DynamoPrimaryKey(attrs: _*)
-
-  }
-
   //TODO: change response to more informative type
   def update(query: Update): Try[Complete.type] = {
-    handleFailure(query.table, Try {
+    recoverQuery(query.table, Try {
       val table = dynamo.getTable(query.table)
       val Ast.PrimaryKey(hash, range) = query.key
       val baseSpec = new UpdateItemSpec()
@@ -143,41 +243,17 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     })
   }
 
-  private def handleFailure[A](table: String, result: Try[A]) = {
-    result.recoverWith {
-      case ex: ResourceNotFoundException =>
-        Failure(new Exception(s"Table '$table' does not exist"))
-    }
-  }
-
-  class TableIterator[A](
-      select: Select,
-      original: JIterator[Page[Item, A]]
-  ) extends Iterator[Timed[Try[List[Item]]]] {
-    private[this] val recovering = new RecoveringIterator(original)
-
-    def next() = Timed {
-      val result = recovering.next().map(_.asScala.toList)
-      handleFailure(select.from, result)
-    }
-
-    def hasNext = recovering.hasNext
-  }
-
   def select(query: Select): Try[ResultSet] = Try {
     def wrap[A](results: ItemCollection[A]) = {
-      val original = results.pages().iterator()
+      import scala.collection.breakOut
+      val it = results.pages.iterator()
+      val original: Iterator[Iterator[JsonNode]] = it.asScala.map {
+        _.asScala.map(Eval.jsonNode)(breakOut)
+      }
       ResultSet(
         new TableIterator(query, original),
         Some(() => results.getAccumulatedConsumedCapacity)
       )
-    }
-
-    //TODO: handle pagination - use withMaxPageSize instead?
-    def scanForward(dir: Option[Direction]) = dir match {
-      case Some(Ascending) => true
-      case Some(Descending) => false
-      case None => true
     }
 
     //TODO: what to do when field does not exist on object?
@@ -186,70 +262,104 @@ class Eval(client: AmazonDynamoDB, pageSize: Int = 20) {
     def querySpec() = {
       val spec = new QuerySpec()
         .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
-      val withFields = query.projection match {
-        case All => spec
-        case Fields(fields) => spec.withAttributesToGet(fields: _*)
-      }
-      query.limit.fold(withFields) {
+
+      val (aggregates, fields) = resolveProjection(query.projection)
+      val withFields = if (fields.nonEmpty) {
+        spec.withAttributesToGet(fields: _*)
+      } else spec
+
+      (aggregates, query.limit.fold(withFields) {
         limit => withFields.withMaxResultSize(limit)
       }
         .withMaxPageSize(pageSize)
-        .withScanIndexForward(scanForward(query.direction))
+        .withScanIndexForward(scanForward(query.direction)))
     }
 
-    //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
-    query.where match {
-      case Some(Ast.PrimaryKey(Ast.Key(hashKey, hashValue), Some(Ast.Key(sortKey, sortValue)))) =>
+    def querySingle(hash: Key, range: Key) = {
+      val Key(hashKey, hashValue) = hash
+      val Key(rangeKey, rangeValue) = range
+
+      def assumeIndex = {
+        //TODO: cache this
         val grouped = describeTable(query.from).get.indexes.groupBy { index =>
           (index.hash.name, index.range.map(_.name))
         }.mapValues(_.map(_.name))
+        grouped.get(hashKey -> Some(rangeKey)).map {
+          case Seq(indexName) => indexName
+          case indexes => throw AmbiguousIndexException(indexes)
+        }
+      }
 
-        //TODO: check types as well?
-        query.useIndex.orElse(
-          grouped.get(hashKey -> Some(sortKey)).map {
-            case Seq(indexName) => indexName
-            case indexes => throw new AmbiguousIndexException(indexes)
-          }
-        ).map { indexName =>
-            val spec = querySpec()
-              .withHashKey(hashKey, unwrap(hashValue))
-              .withRangeKeyCondition(
-                new RangeKeyCondition(sortKey).eq(unwrap(sortValue))
-              )
-            wrap(table.getIndex(indexName).query(spec))
-          }.getOrElse {
-            val spec = new GetItemSpec()
-            val withFields = (query.projection match {
-              case All => spec
-              case Fields(fields) => spec.withAttributesToGet(fields: _*)
-            }).withPrimaryKey(
-              hashKey,
-              unwrap(hashValue),
-              sortKey,
-              unwrap(sortValue)
+      // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
+      def queryIndex(indexName: String) = {
+        val (aggregates, spec) = querySpec()
+        val results = wrap(table.getIndex(indexName).query(
+          spec
+            .withHashKey(hashKey, unwrap(hashValue))
+            .withRangeKeyCondition(
+              new RangeKeyCondition(rangeKey).eq(unwrap(rangeValue))
             )
-            ResultSet(Iterator(
-              Timed(Try(Option(table.getItem(withFields)).toList))
-            ))
-          }
+        ))
+        (aggregates, results)
+      }
 
-      case Some(Ast.PrimaryKey(Ast.Key(key, value), None)) =>
-        val spec = querySpec().withHashKey(key, unwrap(value))
-        wrap(table.query(spec))
+      def getItem() = {
+        val spec = new GetItemSpec()
 
-      case None =>
-        //TODO: scan doesn't support order (because doesn't on hash key?)
-        val spec = new ScanSpec()
-        val withFields = query.projection match {
-          case All => spec
-          case Fields(fields) => spec.withAttributesToGet(fields: _*)
-        }
-        val withLimit = query.limit.fold(withFields) {
-          limit => withFields.withMaxResultSize(limit)
-        }
-          .withMaxPageSize(pageSize)
-        wrap(table.scan(withLimit))
+        val withKey = spec.withPrimaryKey(
+          hashKey,
+          unwrap(hashValue),
+          rangeKey,
+          unwrap(rangeValue)
+        )
+
+        val (aggregates, fields) = resolveProjection(query.projection)
+        val withFields = if (fields.nonEmpty) {
+          withKey.withAttributesToGet(fields: _*)
+        } else spec
+
+        val results = ResultSet(Iterator(
+          Timed(Try(Option(table.getItem(withFields)).map(Eval.jsonNode).toList))
+        ))
+        (aggregates, results)
+      }
+
+      //TODO: check types as well?
+      query.useIndex.orElse(assumeIndex)
+        .map(queryIndex)
+        .getOrElse(getItem())
     }
+
+    def range(field: String, value: KeyValue) = {
+      val (aggregates, spec) = querySpec()
+      val results = table.query(spec.withHashKey(field, unwrap(value)))
+      (aggregates, wrap(results))
+    }
+
+    def scan() = {
+      //TODO: scan doesn't support order (because doesn't on hash key?)
+      val spec = new ScanSpec()
+      val (aggregates, fields) = resolveProjection(query.projection)
+      val withFields = if (fields.nonEmpty) {
+        spec.withAttributesToGet(fields: _*)
+      } else spec
+
+      val withLimit = query.limit.fold(withFields) {
+        limit => withFields.withMaxResultSize(limit)
+      }
+        .withMaxPageSize(pageSize)
+      val results = table.scan(withLimit)
+      (aggregates, wrap(results))
+    }
+
+    //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
+    val (aggregates, results) = query.where match {
+      case Some(Ast.PrimaryKey(hash, Some(range))) => querySingle(hash = hash, range = range)
+      case Some(Ast.PrimaryKey(Ast.Key(field, value), None)) => range(field, value)
+      case None => scan()
+    }
+
+    applyAggregates(aggregates, results)
   }
 
 }
