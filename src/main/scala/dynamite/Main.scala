@@ -14,7 +14,7 @@ object Main {
               Repl(config)
             }
         }
-      case None =>
+      case None => sys.exit(1)
     }
   }
 
