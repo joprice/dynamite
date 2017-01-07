@@ -1,12 +1,13 @@
 package dynamite
 
 import java.util.stream.Collectors
+
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.{ DescribeTable, ShowTables }
 import jline.internal.Ansi
 
-import scala.util.{ Failure, Success }
+import scala.util.{ Failure, Success, Try }
 
 object Script {
 
@@ -15,7 +16,35 @@ object Script {
     apply(opts, input)
   }
 
+  // paginate through the results, exiting at the first failure and printing as each page is processed
   def render(
+    format: Format,
+    projection: Seq[Ast.Projection],
+    data: Iterator[Timed[Try[List[JsonNode]]]]
+  ) = {
+    // paginate through the results, exiting at the first failure and printing as each page is processed
+    var first = true
+    var result: Either[String, Unit] = Right(())
+    while (result.isRight && data.hasNext) {
+      data.next().result match {
+        case Success(values) =>
+          val output = renderPage(
+            format,
+            values,
+            projection,
+            first
+          )
+          Console.out.println(output)
+          result = Right(())
+        case Failure(ex) =>
+          result = Left(ex.getMessage)
+      }
+      first = false
+    }
+    result
+  }
+
+  def renderPage(
     format: Format,
     values: Seq[JsonNode],
     projection: Seq[Ast.Projection],
@@ -25,7 +54,7 @@ object Script {
       Ansi.stripAnsi(Repl.render(
         values,
         projection,
-        withHeaders = withHeaders,
+        withHeaders,
         align = false
       )).trim
     case Format.Json =>
@@ -42,33 +71,14 @@ object Script {
         Eval(client, pageSize = 20).run(query) match {
           case Success(results) =>
             (query, results) match {
-              case (select: Ast.Select, Response.ResultSet(pages, capacity)) =>
-                // paginate through the results, exiting at the first failure and printing as each page is processed
-                var result: Either[String, Unit] = Right(())
-                var first = true
-                while (result.isRight && pages.hasNext) {
-                  val Timed(value, _) = pages.next
-                  value match {
-                    case Success(values) =>
-                      val output = render(
-                        opts.format,
-                        values,
-                        select.projection,
-                        withHeaders = first
-                      )
-                      Console.out.println(output)
-                      first = false
-                    case Failure(ex) =>
-                      result = Left(ex.getMessage)
-                  }
-                }
-                result
-              //TODO: format output
+              case (select: Ast.Select, Response.ResultSet(pages, _)) =>
+                render(opts.format, select.projection, pages)
               case (ShowTables, Response.TableNames(names)) =>
+                //TODO: format tables output
                 Console.out.println(names.mkString("\n"))
                 Right(())
               //TODO: print update/delete success/failiure
-              case (DescribeTable(_), Response.TableNames(names)) => Right(())
+              case (DescribeTable(_), Response.TableNames(_)) => Right(())
               case unhandled => Left(s"unhandled response $unhandled")
             }
           case Failure(ex) => Left(ex.getMessage)

@@ -7,7 +7,7 @@ object Table {
   def apply(
     headers: Seq[String],
     data: Seq[Seq[Str]],
-    width: Option[Int] = None
+    width: Option[Int]
   ): String = {
     val str = new StringWriter()
     val out = new PrintWriter(str)
@@ -32,7 +32,8 @@ object Table {
         case (col, i) =>
           val max = maxes(i)
           val size = col.length
-          if (size < max) col + (" " * (max - size)) else col
+          val rendered = col.render
+          if (size < max) rendered + (" " * (max - size)) else rendered
       }.mkString("\t")
       out.println(output)
     }

@@ -8,13 +8,16 @@ import dynamite.Ast.Projection.FieldSelector._
 
 class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
-  def validate(query: String, expected: Query) = {
+  def parse(query: String) = {
     val result = Parser(query)
     result.left.foreach { error =>
-      println(error)
+      println(error.getCause.getMessage)
     }
-    result.right.value should be(expected)
-    //expected should be(result.right.get)
+    result.right.value
+  }
+
+  def validate(query: String, expected: Query) = {
+    parse(query) should be(expected)
   }
 
   "parser" should "parse wildcard fields" in {
@@ -300,6 +303,20 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   it should "support count" in {
     validate("select count(*) from playlist", Select(Seq(Count), "playlist"))
+  }
+
+  it should "support describing tables" in {
+    validate("describe table playlist", DescribeTable("playlist"))
+  }
+
+  it should "ignore case" in {
+    parse("SELECT * FROM playlists ASC LIMIT 1 USE INDEX playlist-length-keys-only")
+    parse("SELECT COUNT(*) FROM playlists DESC LIMIT 1 USE INDEX playlist-length-keys-only")
+    parse("INSERT INTO playlists (id, tracks) VALUES (1, [1,2,3])")
+    parse("UPDATE playlists SET name = 'Chillax' WHERE userId = 'user-id-1' AND id = 1")
+    parse("SHOW TABLES")
+    parse("DESCRIBE TABLE playlist")
+    parse("DELETE FROM playlists WHERE userId = 'user-id-1' AND id = 1")
   }
 }
 

@@ -7,6 +7,8 @@ import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 //TODO: case insensitive keyword
 object Parser {
 
+  def keyword(value: String) = IgnoreCase(value)
+
   def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
 
   def commaSeparated[A](parser: Parser[A]) = parser.rep(1, sep = "," ~/ space.rep)
@@ -36,9 +38,9 @@ object Parser {
 
   val float = P("-".? ~ integer.? ~ "." ~ integer).!
 
-  val stringValue = P(string.map(StringValue(_)))
-  val floatValue = P(float.map(FloatValue(_)))
-  val integerValue = P(integer.map(IntValue(_)))
+  val stringValue = P(string.map(StringValue))
+  val floatValue = P(float.map(FloatValue))
+  val integerValue = P(integer.map(IntValue))
   val numberValue = P(floatValue | integerValue)
 
   // keys support strings, number, and binary (TODO: support 'binary' input?)
@@ -52,31 +54,31 @@ object Parser {
   val value = P(keyValue | listValue)
 
   //TODO: fail parse on invalid numbers?
-  val limit = P("limit" ~/ spaces ~ integer.map(_.toInt))
+  val limit = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
 
   val key = P(setField(keyValue).map(Key.tupled))
 
   val primaryKey = P(
-    "where" ~/ spaces ~ key
-      ~ (spaces ~ "and" ~/ spaces ~ key).?
+    keyword("where") ~/ spaces ~ key
+      ~ (spaces ~ keyword("and") ~/ spaces ~ key).?
   ).map {
       case (hash, sortKey) =>
         PrimaryKey(hash, sortKey)
     }
 
   val direction: Parser[Direction] = P(
-    P("asc").map(_ => Ascending) |
-      P("desc").map(_ => Descending)
+    P(keyword("asc")).map(_ => Ascending) |
+      P(keyword("desc")).map(_ => Descending)
   )
 
-  val from = P("from" ~ spaces ~ ident)
+  val from = P(keyword("from") ~ spaces ~ ident)
 
   val field = P(ident).map(FieldSelector.Field)
 
-  val aggregateFunction = P("count".!)
+  val aggregateFunction = P(keyword("count").!)
 
   val aggregate: Parser[Aggregate] = P(
-    aggregateFunction ~ spaces.? ~ "(" ~ spaces.? ~ allFields ~ spaces.? ~ ")"
+    aggregateFunction.map(_.toLowerCase) ~ spaces.? ~ "(" ~ spaces.? ~ allFields ~ spaces.? ~ ")"
   ).map {
       case ("count", _) => Aggregate.Count
       case (other, _) =>
@@ -99,10 +101,10 @@ object Parser {
     commaSeparated(projection)
   )
 
-  val useIndex = "use" ~ spaces ~ "index" ~ spaces ~ ident
+  val useIndex = keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
 
   val select = P(
-    "select" ~/ spaces ~
+    keyword("select") ~/ spaces ~
       projections ~ spaces ~
       from ~
       opt(primaryKey) ~
@@ -112,32 +114,32 @@ object Parser {
   ).map(Select.tupled)
 
   val update = P(
-    "update" ~/ spaces ~ ident ~ spaces ~
-      "set" ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
+    keyword("update") ~/ spaces ~ ident ~ spaces ~
+      keyword("set") ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
       primaryKey
   )
     .map(Update.tupled)
 
-  val delete = P("delete" ~/ spaces ~ from ~ spaces ~ primaryKey)
+  val delete = P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
     .map(Delete.tupled)
 
   val insert = P(
-    "insert" ~/ spaces ~
-      "into" ~ spaces ~ ident ~ spaces ~
+    keyword("insert") ~/ spaces ~
+      keyword("into") ~ spaces ~ ident ~ spaces ~
       // it would be nice to have column names be optional, but there is no
       // stable order of a dynamo schema. Some convention could be introduced, but it
       // might surprising. Optional feature?
       "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
-      "values" ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
+      keyword("values") ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
   ).map {
       case (table, keys, values) =>
         val pairs = keys.zip(values)
         Insert(table, pairs)
     }
 
-  val describeTable = P("describe" ~ spaces ~ "table" ~ spaces ~ ident).map(DescribeTable(_))
+  val describeTable = P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident).map(DescribeTable)
 
-  val showTables = P("show" ~ spaces ~ "tables").map(_ => ShowTables)
+  val showTables = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
   val query = P(spaces.? ~ (
     update | select | delete | insert | showTables | describeTable
