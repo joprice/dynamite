@@ -3,7 +3,7 @@ package dynamite
 import org.scalatest._
 import Ast._
 
-class ParserSpec extends FlatSpec with Matchers {
+class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   def validate(query: String, expected: Query) = {
     val result = Parser(query).right.get
@@ -285,6 +285,10 @@ class ParserSpec extends FlatSpec with Matchers {
       "select * from playlists use index playlist-length-keys-only",
       Select(All, "playlists", useIndex = Some("playlist-length-keys-only"))
     )
+  }
+
+  it should "fail on empty table name" in {
+    Parser("select * from ") should be('left)
   }
 }
 
