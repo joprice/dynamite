@@ -1,8 +1,8 @@
 package dynamite
 
 import fastparse.all._
-
 import Ast._
+import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 
 //TODO: case insensitive keyword
 object Parser {
@@ -15,6 +15,7 @@ object Parser {
 
   val spaces = P(space.rep(1))
 
+  //TODO: use .opaque for this
   val character = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')))
 
   //TODO: support hyphens in fields?
@@ -53,7 +54,7 @@ object Parser {
   //TODO: fail parse on invalid numbers?
   val limit = P("limit" ~/ spaces ~ integer.map(_.toInt))
 
-  val key = P(setField(keyValue).map((Key.apply _).tupled))
+  val key = P(setField(keyValue).map(Key.tupled))
 
   val primaryKey = P(
     "where" ~/ spaces ~ key
@@ -70,32 +71,55 @@ object Parser {
 
   val from = P("from" ~ spaces ~ ident)
 
-  val fields = P(commaSeparated(ident))
+  val field = P(ident).map(FieldSelector.Field)
 
-  val projection = P(
-    "select" ~/ spaces ~ ("*".!.map(_ => All) | fields.map(Fields(_)))
+  val aggregateFunction = P("count".!)
+
+  val aggregate: Parser[Aggregate] = P(
+    aggregateFunction ~ spaces.? ~ "(" ~ spaces.? ~ allFields ~ spaces.? ~ ")"
+  ).map {
+      case ("count", _) => Aggregate.Count
+      case (other, _) =>
+        //TODO: custom exception with all valid aggregates
+        throw new Exception(s"$other is not a valid aggregate function")
+    }
+
+  val allFields = P("*".!.map(_ => FieldSelector.All))
+
+  val fieldSelector: Parser[FieldSelector] = P(
+    allFields | field
+  )
+
+  val projection: Parser[Projection] = P(
+    // TODO: support select sum(field), a, etc.
+    aggregate | fieldSelector
+  )
+
+  val projections: Parser[Seq[Projection]] = P(
+    commaSeparated(projection)
   )
 
   val useIndex = "use" ~ spaces ~ "index" ~ spaces ~ ident
 
   val select = P(
-    projection ~ spaces ~
+    "select" ~/ spaces ~
+      projections ~ spaces ~
       from ~
       opt(primaryKey) ~
       opt(direction) ~
       opt(limit) ~
       opt(useIndex)
-  ).map((Select.apply _).tupled)
+  ).map(Select.tupled)
 
   val update = P(
     "update" ~/ spaces ~ ident ~ spaces ~
       "set" ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
       primaryKey
   )
-    .map((Update.apply _).tupled)
+    .map(Update.tupled)
 
   val delete = P("delete" ~/ spaces ~ from ~ spaces ~ primaryKey)
-    .map((Delete.apply _).tupled)
+    .map(Delete.tupled)
 
   val insert = P(
     "insert" ~/ spaces ~
@@ -119,12 +143,37 @@ object Parser {
     update | select | delete | insert | showTables | describeTable
   ) ~ spaces.? ~ End)
 
-  def apply(input: String): Either[Parsed.Failure, Query] = {
+  sealed abstract class ParseException(message: String, cause: Option[Throwable])
+    extends Exception(message, cause.orNull)
+  final case class ParseError(failure: Parsed.Failure) extends ParseException(
+    "Failed parsing query", Some(fastparse.core.ParseError(failure))
+  )
+  final case class UnAggregatedFieldsError(fields: Seq[String]) extends ParseException(
+    "Aggregates may not be used with unaggregated fields", None
+  )
+
+  def validate(query: Query): Either[ParseException, Query] = query match {
+    case select: Select =>
+      val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
+        case (state, FieldSelector.All) => state
+        case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
+        case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
+      }
+      if (aggs.nonEmpty && fields.nonEmpty) {
+        Left(UnAggregatedFieldsError(fields))
+      } else {
+        Right(select)
+      }
+    case _ => Right(query)
+  }
+
+  def apply(input: String): Either[ParseException, Query] = {
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     import fastparse.core.Parsed.{ Failure, Success }
     query.parse(input) match {
+      case Success(select: Select, _) => validate(select)
       case Success(value, _) => Right(value)
-      case failure: Failure[_, _] => Left(failure)
+      case failure: Failure[_, _] => Left(ParseError(failure))
     }
   }
 }

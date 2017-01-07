@@ -2,51 +2,58 @@ package dynamite
 
 import org.scalatest._
 import Ast._
+import EitherValues._
+import dynamite.Ast.Projection.Aggregate._
+import dynamite.Ast.Projection.FieldSelector._
 
 class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   def validate(query: String, expected: Query) = {
-    val result = Parser(query).right.get
-    expected should be(result)
+    val result = Parser(query)
+    result.left.foreach { error =>
+      println(error)
+    }
+    result.right.value should be(expected)
+    //expected should be(result.right.get)
   }
 
   "parser" should "parse wildcard fields" in {
-    validate("select * from playlist", Select(All, "playlist"))
+    validate("select * from playlist", Select(Seq(All), "playlist"))
   }
 
   "parser" should "allow dashes in ident" in {
-    validate("select * from playlist-legacy", Select(All, "playlist-legacy"))
+    validate("select * from playlist-legacy", Select(Seq(All), "playlist-legacy"))
   }
 
   "parser" should "parse a single field" in {
-    validate("select id from playlist", Select(Fields(Seq("id")), "playlist"))
+    validate("select id from playlist", Select(Seq(Field("id")), "playlist"))
   }
 
   it should "allow multiple fields" in {
     validate(
       "select id,name from playlist",
-      Select(Fields(Seq("id", "name")), "playlist")
+      Select(Seq(Field("id"), Field("name")), "playlist")
     )
   }
 
   it should "tolerate whitespace between fields" in {
     validate(
       "select id,    name from playlist",
-      Select(Fields(Seq("id", "name")), "playlist")
+      Select(Seq(Field("id"), Field("name")), "playlist")
     )
   }
 
   it should "tolerate whitespace before from" in {
     validate(
       "select id, name     from playlist",
-      Select(Fields(Seq("id", "name")), "playlist")
+      Select(Seq(Field("id"), Field("name")), "playlist")
     )
   }
 
   it should "tolerate whitespace before table name" in {
     validate(
       "select id, name from          playlist",
-      Select(Fields(Seq("id", "name")), "playlist")
+      Select(Seq("id", "name").map(Field), "playlist")
     )
   }
 
@@ -54,7 +61,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist where id = 'user-id-1'",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         Option(PrimaryKey(Key("id", StringValue("user-id-1")), None))
       )
@@ -65,7 +72,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist where userId = 1 and id = 'user-id-1'",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         Option(
           PrimaryKey(
@@ -81,7 +88,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist where id = \"user-id-1\"",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         Option(PrimaryKey(Key("id", StringValue("user-id-1")), None))
       )
@@ -92,7 +99,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist where id = 1",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         Option(PrimaryKey(Key("id", IntValue("1")), None))
       )
@@ -175,7 +182,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist    limit 10",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         limit = Some(10)
       )
@@ -186,7 +193,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist asc limit 10",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         None,
         Some(Ascending),
@@ -199,7 +206,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate(
       "select id, name from playlist desc limit 10",
       Select(
-        Fields(Seq("id", "name")),
+        Seq("id", "name").map(Field),
         "playlist",
         None,
         Some(Descending),
@@ -283,12 +290,16 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
   it should "allow an explicit index to be used" in {
     validate(
       "select * from playlists use index playlist-length-keys-only",
-      Select(All, "playlists", useIndex = Some("playlist-length-keys-only"))
+      Select(Seq(All), "playlists", useIndex = Some("playlist-length-keys-only"))
     )
   }
 
   it should "fail on empty table name" in {
     Parser("select * from ") should be('left)
+  }
+
+  it should "support count" in {
+    validate("select count(*) from playlist", Select(Seq(Count), "playlist"))
   }
 }
 

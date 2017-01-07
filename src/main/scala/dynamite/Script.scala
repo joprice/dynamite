@@ -1,8 +1,11 @@
 package dynamite
 
 import java.util.stream.Collectors
+import com.amazonaws.jmespath.ObjectMapperSingleton
+import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.{ DescribeTable, ShowTables }
 import jline.internal.Ansi
+
 import scala.util.{ Failure, Success }
 
 object Script {
@@ -12,12 +15,31 @@ object Script {
     apply(opts, input)
   }
 
+  def render(
+    format: Format,
+    values: Seq[JsonNode],
+    projection: Seq[Ast.Projection],
+    withHeaders: Boolean
+  ) = format match {
+    case Format.Tabular =>
+      Ansi.stripAnsi(Repl.render(
+        values,
+        projection,
+        withHeaders = withHeaders,
+        align = false
+      )).trim
+    case Format.Json =>
+      values.map(_.toString).mkString("\n")
+    case Format.JsonPretty =>
+      values.map(prettyPrint).mkString("\n")
+  }
+
   def apply(opts: Opts, input: String): Unit = {
     val result = Parser(input.trim.stripSuffix(";")).fold({ failure =>
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, { query =>
       Repl.withClient(opts) { client =>
-        Eval(client).run(query) match {
+        Eval(client, pageSize = 20).run(query) match {
           case Success(results) =>
             (query, results) match {
               case (select: Ast.Select, Response.ResultSet(pages, capacity)) =>
@@ -28,19 +50,12 @@ object Script {
                   val Timed(value, _) = pages.next
                   value match {
                     case Success(values) =>
-                      val output = opts.render match {
-                        case Format.Tabular =>
-                          Ansi.stripAnsi(Repl.render(
-                            values,
-                            select.projection,
-                            withHeaders = first,
-                            align = false
-                          )).trim
-                        case Format.Json =>
-                          values.map(_.toJSON).mkString("\n")
-                        case Format.JsonPretty =>
-                          values.map(_.toJSONPretty).mkString("\n")
-                      }
+                      val output = render(
+                        opts.format,
+                        values,
+                        select.projection,
+                        withHeaders = first
+                      )
                       Console.out.println(output)
                       first = false
                     case Failure(ex) =>
@@ -48,7 +63,7 @@ object Script {
                   }
                 }
                 result
-              //TODO: write
+              //TODO: format output
               case (ShowTables, Response.TableNames(names)) =>
                 Console.out.println(names.mkString("\n"))
                 Right(())
@@ -66,4 +81,9 @@ object Script {
       sys.exit(1)
     }
   }
+
+  def prettyPrint(node: JsonNode) =
+    ObjectMapperSingleton.getObjectMapper.writerWithDefaultPrettyPrinter()
+      .writeValueAsString(node)
+
 }

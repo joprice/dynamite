@@ -2,9 +2,9 @@ package dynamite
 
 import scopt.Read
 
-case class Opts(
+final case class Opts(
   endpoint: Option[String] = None,
-  render: Format = Format.Tabular,
+  format: Format = Format.Tabular,
   script: Option[String] = None
 )
 
@@ -20,7 +20,7 @@ object Opts {
     }.text("aws endpoint")
 
     opt[Format]("format").action { (render, config) =>
-      config.copy(render = render)
+      config.copy(format = render)
     }
 
     opt[String]("script").action { (script, config) =>

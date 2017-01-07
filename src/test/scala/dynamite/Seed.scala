@@ -8,9 +8,7 @@ import play.api.libs.json.Json
 
 object Seed {
 
-  val tableName = "playlists"
-
-  def createTable(client: AmazonDynamoDB): Unit = {
+  def createTable(tableName: String, client: AmazonDynamoDB): Unit = {
     TableUtils.createTableIfNotExists(
       client,
       new CreateTableRequest()
@@ -23,13 +21,21 @@ object Seed {
         .withAttributeDefinitions(
           new AttributeDefinition("userId", ScalarAttributeType.S),
           new AttributeDefinition("id", ScalarAttributeType.N),
-          new AttributeDefinition("duration", ScalarAttributeType.N)
+          new AttributeDefinition("duration", ScalarAttributeType.N),
+          new AttributeDefinition("name", ScalarAttributeType.S)
         )
         .withKeySchema(
           new KeySchemaElement("userId", KeyType.HASH),
           new KeySchemaElement("id", KeyType.RANGE)
         )
         .withLocalSecondaryIndexes(
+          new LocalSecondaryIndex()
+            .withIndexName("playlist-name")
+            .withKeySchema(
+              new KeySchemaElement("userId", KeyType.HASH),
+              new KeySchemaElement("name", KeyType.RANGE)
+            )
+            .withProjection(new Projection().withProjectionType(ProjectionType.ALL)),
           new LocalSecondaryIndex()
             .withIndexName("playlist-length")
             .withKeySchema(
@@ -80,17 +86,17 @@ object Seed {
     )
   )
 
-  def insertSeedData(client: AmazonDynamoDB) = {
+  def insertSeedData(tableName: String, client: AmazonDynamoDB) = {
     val dynamo = new DynamoDB(client)
     val table = dynamo.getTable(tableName)
     val items = seedData.map(json => Item.fromJSON(Json.stringify(json)))
     items.foreach(table.putItem(_))
   }
 
-  def apply(client: AmazonDynamoDB): Unit = {
+  def apply(tableName: String, client: AmazonDynamoDB): Unit = {
     //TableUtils.deleteTableIfExists(client, new DeleteTableRequest().withTableName("users"))
-    createTable(client)
-    insertSeedData(client)
+    Seed.createTable(tableName, client)
+    Seed.insertSeedData(tableName, client)
   }
 }
 
