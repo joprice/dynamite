@@ -26,7 +26,8 @@ dynamoDBLocalVersion := "2016-05-17"
 startDynamoDBLocal := startDynamoDBLocal.dependsOn(compile in Test).value
 test in Test := (test in Test).dependsOn(startDynamoDBLocal).value
 testOptions in Test += dynamoDBLocalTestCleanup.value
-testOnly in Test <<= (testOnly in Test).dependsOn(startDynamoDBLocal)
+testOnly in Test := (testOnly in Test).dependsOn(startDynamoDBLocal).value
+testQuick in Test := (testQuick in Test).dependsOn(startDynamoDBLocal).value
 
 dynamoDBLocalPort := new java.net.ServerSocket(0).getLocalPort
 
