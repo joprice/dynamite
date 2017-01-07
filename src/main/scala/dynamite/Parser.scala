@@ -15,8 +15,10 @@ object Parser {
 
   val spaces = P(space.rep(1))
 
+  val character = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')))
+
   //TODO: support hyphens in fields?
-  val ident = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')).rep.!)
+  val ident = P(character.rep(1).!)
 
   def str(delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
