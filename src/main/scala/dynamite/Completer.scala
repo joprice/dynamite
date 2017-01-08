@@ -92,8 +92,8 @@ object Completer {
 
   def apply(
     reader: ConsoleReader,
-    showTables: => Try[TableNames],
-    tableCache: TableCache
+    tableCache: TableCache,
+    showTables: => Try[TableNames]
   ) = {
     val tableNames = new TableNamesCompleter(showTables)
     val fields = new FieldsCompleter(reader, tableCache)

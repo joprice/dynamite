@@ -1,19 +1,28 @@
 package dynamite
 
+import java.io.File
+
 import scopt.Read
 
 final case class Opts(
   endpoint: Option[String] = None,
   format: Format = Format.Tabular,
-  script: Option[String] = None
+  script: Option[String] = None,
+  configFile: Option[File] = None
 )
 
 object Opts {
   val appName = "dynamite"
 
+  def parse(args: Seq[String]) = parser.parse(args, Opts())
+
   val parser = new scopt.OptionParser[Opts](appName) {
     head(appName, s"v${BuildInfo.version}")
     version("version")
+
+    opt[File]("config-file").action { (configFile, config) =>
+      config.copy(configFile = Some(configFile))
+    }.text("Config file location. Default is $HOME/.dynamite/config")
 
     opt[String]("endpoint").action { (endpoint, config) =>
       config.copy(endpoint = Some(endpoint))

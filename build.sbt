@@ -17,8 +17,11 @@ libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fansi" % "0.2.3",
   "com.github.scopt" %% "scopt" % "3.5.0",
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
+  "com.typesafe" % "config" % "1.3.1",
+  "com.iheart" %% "ficus" % "1.4.0",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test,
-  "com.typesafe.play" %% "play-json" % "2.6.0-M1" % Test
+  "com.typesafe.play" %% "play-json" % "2.6.0-M1" % Test,
+  "org.scalamock" %% "scalamock-scalatest-support" % "3.4.2" % Test
 )
 
 dynamoDBLocalVersion := "2016-05-17"

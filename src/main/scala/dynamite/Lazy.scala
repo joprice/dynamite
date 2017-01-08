@@ -1,9 +1,10 @@
 package dynamite
 
 class Lazy[A](value: => A) {
-  var accessed = false
+  private[this] var _accessed = false
+  def accessed = _accessed
   private[this] lazy val _value = {
-    accessed = true
+    _accessed = true
     value
   }
   def apply() = _value

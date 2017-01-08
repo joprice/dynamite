@@ -24,11 +24,11 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate("select * from playlist", Select(Seq(All), "playlist"))
   }
 
-  "parser" should "allow dashes in ident" in {
+  it should "allow dashes in ident" in {
     validate("select * from playlist-legacy", Select(Seq(All), "playlist-legacy"))
   }
 
-  "parser" should "parse a single field" in {
+  it should "parse a single field" in {
     validate("select id from playlist", Select(Seq(Field("id")), "playlist"))
   }
 

@@ -61,38 +61,38 @@ object Eval {
   }
 
   def applyAggregates(aggregates: Seq[Aggregate], resultSet: ResultSet): ResultSet = {
-    if (aggregates.nonEmpty) {
-      aggregates.head match {
-        case agg: Aggregate.Count.type =>
-          resultSet.copy(
-            results = LazySingleIterator {
-              val it = resultSet.results
-              var totalDuration = 0.seconds
-              var count = 0
-              var failure: Option[Throwable] = None
-              while (failure.isEmpty && it.hasNext) {
-                val Timed(result, duration) = it.next
-                result match {
-                  case Success(rows) =>
-                    count += rows.size
-                  case Failure(ex) => failure = Some(ex)
-                }
-                totalDuration += duration
+    // For now, using headOption, since the only aggregate supported at the moment is Count(*) and duplicate
+    // aggregates will be resolved by reference
+    aggregates.headOption.fold(resultSet) {
+      case agg: Aggregate.Count.type =>
+        resultSet.copy(
+          results = LazySingleIterator {
+            val it = resultSet.results
+            var totalDuration = 0.seconds
+            var count = 0
+            var failure: Option[Throwable] = None
+            while (failure.isEmpty && it.hasNext) {
+              val Timed(result, duration) = it.next
+              result match {
+                case Success(rows) =>
+                  count += rows.size
+                case Failure(ex) => failure = Some(ex)
               }
-
-              Timed(
-                failure.map[Try[List[JsonNode]]] { ex =>
-                  Failure[List[JsonNode]](ex)
-                }.getOrElse {
-                  val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
-                  node.put(agg.name, count)
-                  Success(List(node))
-                }, totalDuration
-              )
+              totalDuration += duration
             }
-          )
-      }
-    } else resultSet
+
+            Timed(
+              failure.map[Try[List[JsonNode]]] { ex =>
+                Failure[List[JsonNode]](ex)
+              }.getOrElse {
+                val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                node.put(agg.name, count)
+                Success(List(node))
+              }, totalDuration
+            )
+          }
+        )
+    }
   }
 
   def recoverQuery[A](table: String, result: Try[A]) = {
@@ -105,6 +105,10 @@ object Eval {
   final case class AmbiguousIndexException(indexes: Seq[String]) extends Exception(
     s"""Multiple indexes can fulfill the query: ${indexes.mkString("[", ", ", "]")}.
        |Choose an index explicitly with a 'use index' clause.""".stripMargin
+  )
+
+  final case class UnknownTableException(table: String) extends Exception(
+    s"Unknown table: $table"
   )
 
   object LazySingleIterator {
@@ -295,7 +299,9 @@ class Eval(
 
       def assumeIndex = {
         //TODO: cache this
-        val grouped = describeTable(query.from).get.indexes.groupBy { index =>
+        val grouped = describeTable(query.from).getOrElse {
+          throw UnknownTableException(query.from)
+        }.indexes.groupBy { index =>
           (index.hash.name, index.range.map(_.name))
         }.mapValues(_.map(_.name))
         grouped.get(hashKey -> Some(rangeKey)).map {
