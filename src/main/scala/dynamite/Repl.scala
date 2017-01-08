@@ -73,7 +73,7 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
         case paging: TableNamePaging =>
           handle(paging) { values =>
             val headers = Seq("name")
-            out.println(Table(headers, values.map(name => Seq(Str(name)))))
+            out.println(Table(headers, values.map(name => Seq(Str(name))), None))
           }
       }
     }
@@ -103,7 +103,8 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
               renderSchema(description.hash),
               description.range.fold(Str(""))(renderSchema)
             )
-          )
+          ),
+          None
         )
       }
     |${heading("indexes")}
@@ -116,7 +117,8 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
               renderSchema(index.hash),
               index.range.fold(Str(""))(renderSchema)
             )
-          }
+          },
+          None
         )
       }""".stripMargin
 
