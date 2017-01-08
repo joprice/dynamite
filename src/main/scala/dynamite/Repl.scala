@@ -22,6 +22,7 @@ import dynamite.Response.KeySchema
 import fansi._
 
 import scala.util.{ Failure, Success, Try }
+import com.typesafe.config.ConfigFactory
 
 class Repl(
     eval: Ast.Query => Try[Response],
@@ -236,27 +237,34 @@ object Repl {
     }
   }
 
-  def apply(opts: Opts): Unit = {
-    val client = new Lazy({
+  def apply(opts: Opts): Unit =
+    apply(new Lazy({
       dynamoClient(opts.endpoint)
-    })
-    apply(client, pageSize = 20)
-  }
+    }))
 
-  def apply(client: Lazy[AmazonDynamoDBClient], pageSize: Int): Unit = {
+  def historyFile(configDir: File) =
+    new File(configDir, "history")
+
+  def apply(client: Lazy[AmazonDynamoDBClient]): Unit = {
     println(s"${Opts.appName} v${BuildInfo.version}")
 
     withReader(new ConsoleReader) { reader =>
-      //TODO: switch to save history in .dql folder instead?
-      val file = new File(sys.props("user.home"), ".dql-history")
-      withFileHistory(file, reader) {
+      val configDir = Config.ensureConfigDir()
+      //TODO: log to logfile in .dql
+      val config = Config.loadConfig(configDir).recover {
+        case error: Throwable =>
+          System.err.println(s"Failed to load config: ${error.getMessage}")
+          sys.exit(1)
+      }.get
+
+      withFileHistory(historyFile(configDir), reader) {
         resetPrompt(reader)
         reader.setExpandEvents(false)
 
         //TODO: load current state from config
         val format = new AtomicReference[Ast.Format](Ast.Format.Tabular)
 
-        lazy val eval = Eval(client(), pageSize, format)
+        lazy val eval = Eval(client(), config.pageSize, format)
 
         val tableCache = new TableCache(Lazy(eval.describeTable))
         reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
