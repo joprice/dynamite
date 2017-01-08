@@ -56,6 +56,7 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ywarn-inaccessible",
   "-Ywarn-dead-code",
   "-Xfatal-warnings"
+  //"-Ypatmat-exhaust-depth", "off"
 )
 
 lazy val checkVersionNotes = taskKey[Unit](
@@ -93,4 +94,5 @@ releaseProcess := Seq[ReleaseStep](
   commitNextVersion,
   pushChanges
 )
+
 

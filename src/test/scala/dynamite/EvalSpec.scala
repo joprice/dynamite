@@ -1,5 +1,7 @@
 package dynamite
 
+import java.util.concurrent.atomic.AtomicReference
+
 import dynamite.Eval.AmbiguousIndexException
 import org.scalatest._
 import play.api.libs.json.Json
@@ -12,7 +14,7 @@ class EvalSpec
 
   val tableName = "eval-spec"
 
-  val eval = Eval(client, 20)
+  val eval = Eval(client, 20, new AtomicReference(Ast.Format.Tabular))
 
   final case class User(name: String)
 

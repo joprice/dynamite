@@ -1,5 +1,6 @@
 package dynamite
 
+import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.Collectors
 
 import com.amazonaws.jmespath.ObjectMapperSingleton
@@ -68,7 +69,7 @@ object Script {
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, { query =>
       Repl.withClient(opts) { client =>
-        Eval(client, pageSize = 20).run(query) match {
+        Eval(client, 20, new AtomicReference(Ast.Format.Tabular)).run(query) match {
           case Success(results) =>
             (query, results) match {
               case (select: Ast.Select, Response.ResultSet(pages, _)) =>
@@ -78,7 +79,11 @@ object Script {
                 Console.out.println(names.mkString("\n"))
                 Right(())
               //TODO: print update/delete success/failiure
-              case (DescribeTable(_), Response.TableNames(_)) => Right(())
+              case (DescribeTable(_), Response.TableNames(_)) =>
+                Right(())
+              case (_, Response.Info(message)) =>
+                Console.out.println(message)
+                Right(())
               case unhandled => Left(s"unhandled response $unhandled")
             }
           case Failure(ex) => Left(ex.getMessage)

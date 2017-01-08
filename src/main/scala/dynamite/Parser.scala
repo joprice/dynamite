@@ -141,8 +141,18 @@ object Parser {
 
   val showTables = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
+  val format: Parser[Ast.Format] = P(
+    keyword("tabular").map(_ => Ast.Format.Tabular) |
+      keyword("json").map(_ => Ast.Format.Json)
+  )
+
+  val setFormat = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
+
+  val showFormat = P(keyword("show") ~ spaces ~ keyword("format"))
+    .map(_ => ShowFormat)
+
   val query = P(spaces.? ~ (
-    update | select | delete | insert | showTables | describeTable
+    update | select | delete | insert | showTables | describeTable | setFormat | showFormat
   ) ~ spaces.? ~ End)
 
   sealed abstract class ParseException(message: String, cause: Option[Throwable])

@@ -1,5 +1,7 @@
 package dynamite
 
+import java.util.concurrent.atomic.AtomicReference
+
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
@@ -16,7 +18,11 @@ import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
 
 object Eval {
-  def apply[A](client: AmazonDynamoDB, pageSize: Int) = new Eval(client, pageSize)
+  def apply[A](
+    client: AmazonDynamoDB,
+    pageSize: Int,
+    format: AtomicReference[Ast.Format]
+  ) = new Eval(client, pageSize, format)
 
   def jsonNode(item: Item) = Jackson.jsonNodeOf(item.toJSON)
 
@@ -134,12 +140,20 @@ object Eval {
 
 import Response._
 
-class Eval(client: AmazonDynamoDB, pageSize: Int) {
+class Eval(
+    client: AmazonDynamoDB,
+    pageSize: Int,
+    format: AtomicReference[Ast.Format]
+) {
   import Eval._
 
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
+    case SetFormat(format) =>
+      this.format.set(format)
+      Success(Response.Info(s"Format set to $format"))
+    case ShowFormat => Success(Response.Info(format.get().toString))
     case query: Select => select(query)
     case query: Update => update(query)
     case query: Delete => delete(query)

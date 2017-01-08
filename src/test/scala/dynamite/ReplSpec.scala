@@ -2,6 +2,7 @@ package dynamite
 
 import java.io._
 
+import java.util.concurrent.atomic.AtomicReference
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import fansi.{ Bold, Str }
 import org.scalatest._
@@ -28,7 +29,8 @@ class ReplSpec
       val repl = new Repl(
         _ => Failure(new Exception("fail")),
         reader,
-        new PrintWriter(writer)
+        new PrintWriter(writer),
+        new AtomicReference(Ast.Format.Tabular)
       )
       repl.run()
     }
@@ -52,7 +54,8 @@ class ReplSpec
           )
         ),
         reader,
-        new PrintWriter(writer)
+        new PrintWriter(writer),
+        new AtomicReference(Ast.Format.Tabular)
       ).run()
     }
     writer.toString should be(

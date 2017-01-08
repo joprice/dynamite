@@ -138,6 +138,16 @@ object Completer {
         Null
       ),
       new ArgumentCompleter(
+        literal("show"),
+        literal("format"),
+        Null
+      ),
+      new ArgumentCompleter(
+        literal("format"),
+        literal("json", "tabular"),
+        Null
+      ),
+      new ArgumentCompleter(
         literal("describe"),
         literal("table"),
         tableNames,
