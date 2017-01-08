@@ -2,7 +2,6 @@ package dynamite
 
 import java.io.{ File, PrintWriter, StringWriter }
 import java.util.concurrent.atomic.AtomicReference
-
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
@@ -11,7 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
-
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
@@ -20,9 +18,205 @@ import dynamite.Completer.TableCache
 import dynamite.Parser.{ ParseError, ParseException, UnAggregatedFieldsError }
 import dynamite.Response.KeySchema
 import fansi._
-
 import scala.util.{ Failure, Success, Try }
-import com.typesafe.config.ConfigFactory
+
+object Repl {
+
+  def apply(opts: Opts): Unit = {
+    val client = new Lazy({
+      dynamoClient(opts.endpoint)
+    })
+    val config = opts.configFile
+      .map(DynamiteConfig.parseConfig)
+      .getOrElse {
+        DynamiteConfig.loadConfig(DynamiteConfig.defaultConfigDir)
+      }.recover {
+        case error: Throwable =>
+          System.err.println(s"Failed to load config: ${error.getMessage}")
+          sys.exit(1)
+      }.get
+    apply(client, config)
+  }
+
+  def apply(client: Lazy[AmazonDynamoDBClient], config: DynamiteConfig): Unit = {
+    println(s"${Opts.appName} v${BuildInfo.version}")
+
+    withReader(new ConsoleReader) { reader =>
+      //TODO: log to logfile in .dql
+
+      withFileHistory(config.historyFile, reader) {
+        resetPrompt(reader)
+        reader.setExpandEvents(false)
+
+        //TODO: load current state from config
+        val format = new AtomicReference[Ast.Format](Ast.Format.Tabular)
+
+        lazy val eval = Eval(client(), config.pageSize, format)
+
+        val tableCache = new TableCache(Lazy(eval.describeTable))
+        reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
+
+        // To increase repl start time, the client is initialize lazily. This save .5 second, which is
+        // instead felt by the user when making the first query
+        def run(query: Ast.Query) = eval.run(query)
+
+        val out = new PrintWriter(reader.getOutput)
+        new Repl(run, new JLineReader(reader), out, format).run()
+
+        if (client.accessed) {
+          client().shutdown()
+        }
+      }
+    }
+  }
+
+  def headers(select: Seq[Ast.Projection], data: Seq[JsonNode]): Seq[String] = {
+    select.flatMap {
+      case FieldSelector.All =>
+        data.flatMap(_.fieldNames().asScala)
+          .distinct
+          .sorted
+      case FieldSelector.Field(field) => Seq(field)
+      case count: Aggregate.Count.type => Seq(count.name)
+    }
+  }
+
+  def withReader[A](reader: ConsoleReader)(f: ConsoleReader => A) = {
+    try f(reader) finally reader.close()
+  }
+
+  def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
+    val history = new FileHistory(file)
+    reader.setHistory(history)
+    try {
+      f
+    } finally {
+      history.flush()
+    }
+  }
+
+  def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
+    val client = dynamoClient(opts.endpoint)
+    try {
+      f(client)
+    } finally {
+      client.shutdown()
+    }
+
+  }
+
+  sealed trait Paging[A] {
+    def pageData: Iterator[Timed[Try[List[A]]]]
+  }
+
+  final class TablePaging(
+    val select: Ast.Select,
+    val pageData: Iterator[Timed[Try[List[JsonNode]]]]
+  ) extends Paging[JsonNode]
+
+  final class TableNamePaging(
+    val pageData: Iterator[Timed[Try[List[String]]]]
+  ) extends Paging[String]
+
+  //TODO: when projecting all fields, show hash/sort keys first?
+  def render(
+    list: Seq[JsonNode],
+    select: Seq[Ast.Projection],
+    withHeaders: Boolean = true,
+    align: Boolean = true,
+    width: Option[Int] = None
+  ): String = {
+    val headers = Repl.headers(select, list)
+    //TODO: not all fields need the same names. If All was provided in the query,
+    // alphas sort by fields present in all objects, followed by the sparse ones?
+    //TODO: match order provided if not star
+    val body = list.map { item =>
+      import scala.collection.breakOut
+      val data: Map[String, Any] = item.fields().asScala.toList.map { entry =>
+        (entry.getKey, entry.getValue)
+      }(breakOut)
+      // missing fields are represented by an empty str
+      val maxColumnLength = 40
+      val ellipsis = "..."
+      def truncate(s: String) = {
+        if (s.length > maxColumnLength)
+          s.take(maxColumnLength - ellipsis.length) + ellipsis
+        else s
+      }
+      headers.map {
+        header =>
+          Str(truncate(data.get(header).map {
+            // surround strings with quotes to differentiate them from ints
+            case s: String => s""""$s""""
+            //case list: java.util.ArrayList =>
+            //  list.asScala.take(5).toString
+            case other => other.toString
+          }.getOrElse("")))
+      }
+    }
+    if (align) {
+      val writer = new StringWriter()
+      val out = new PrintWriter(writer)
+      out.println(Table(
+        if (withHeaders) headers else Seq.empty,
+        body,
+        width
+      ))
+      writer.toString
+    } else {
+      (headers +: body)
+        .map(row => row.mkString("\t"))
+        .mkString("\n")
+    }
+  }
+
+  //TODO: improve connection errors - check dynamo listening on provided port
+
+  //TODO: parse port to int
+  def dynamoClient(endpoint: Option[String]) = {
+    val config = new ClientConfiguration()
+      .withConnectionTimeout(1.second.toMillis.toInt)
+      .withSocketTimeout(1.second.toMillis.toInt)
+    endpoint.fold(new AmazonDynamoDBClient()) { endpoint =>
+      new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
+        .withEndpoint[AmazonDynamoDBClient](endpoint)
+    }
+  }
+
+  def resetPrompt(reader: ConsoleReader) =
+    reader.setPrompt(Bold.On(Str("dql> ")).render)
+
+  def errorLine(line: String, errorIndex: Int) = {
+    val to = {
+      val t = line.indexOf('\n', errorIndex)
+      if (t == -1) line.size
+      else t
+    }
+    val from = {
+      val f = line.lastIndexOf('\n', errorIndex)
+      if (f == -1) 0
+      else f + 1
+    }
+    (errorIndex - from, line.substring(from, to))
+  }
+
+  def parseError(line: String, failure: ParseException) = {
+    failure match {
+      case ParseError(error) =>
+        val (errorIndex, lineWithError) = errorLine(line, error.index)
+
+        //TODO: improve error output - use fastparse error
+        s"""${formatError("Failed to parse query")}
+           |${Color.Red(lineWithError)}
+           |${(" " * errorIndex) + "^"}""".stripMargin
+      case error: UnAggregatedFieldsError =>
+        formatError(error.getMessage)
+    }
+  }
+
+  def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
+
+}
 
 class Repl(
     eval: Ast.Query => Try[Response],
@@ -221,202 +415,6 @@ class Repl(
   }
 
   def run() = loop("")
-
-}
-
-object Repl {
-
-  def headers(select: Seq[Ast.Projection], data: Seq[JsonNode]): Seq[String] = {
-    select.flatMap {
-      case FieldSelector.All =>
-        data.flatMap(_.fieldNames().asScala)
-          .distinct
-          .sorted
-      case FieldSelector.Field(field) => Seq(field)
-      case count: Aggregate.Count.type => Seq(count.name)
-    }
-  }
-
-  def apply(opts: Opts): Unit =
-    apply(new Lazy({
-      dynamoClient(opts.endpoint)
-    }))
-
-  def historyFile(configDir: File) =
-    new File(configDir, "history")
-
-  def apply(client: Lazy[AmazonDynamoDBClient]): Unit = {
-    println(s"${Opts.appName} v${BuildInfo.version}")
-
-    withReader(new ConsoleReader) { reader =>
-      val configDir = DynamiteConfig.ensureConfigDir()
-      //TODO: log to logfile in .dql
-      val config = DynamiteConfig.loadConfig(configDir).recover {
-        case error: Throwable =>
-          System.err.println(s"Failed to load config: ${error.getMessage}")
-          sys.exit(1)
-      }.get
-
-      withFileHistory(historyFile(configDir), reader) {
-        resetPrompt(reader)
-        reader.setExpandEvents(false)
-
-        //TODO: load current state from config
-        val format = new AtomicReference[Ast.Format](Ast.Format.Tabular)
-
-        lazy val eval = Eval(client(), config.pageSize, format)
-
-        val tableCache = new TableCache(Lazy(eval.describeTable))
-        reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
-
-        // To increase repl start time, the client is initialize lazily. This save .5 second, which is
-        // instead felt by the user when making the first query
-        def run(query: Ast.Query) = eval.run(query)
-
-        val out = new PrintWriter(reader.getOutput)
-        new Repl(run, new JLineReader(reader), out, format).run()
-
-        if (client.accessed) {
-          client().shutdown()
-        }
-      }
-    }
-  }
-
-  def withReader[A](reader: ConsoleReader)(f: ConsoleReader => A) = {
-    try f(reader) finally reader.close()
-  }
-
-  def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
-    val history = new FileHistory(file)
-    reader.setHistory(history)
-    try {
-      f
-    } finally {
-      history.flush()
-    }
-  }
-
-  def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
-    val client = dynamoClient(opts.endpoint)
-    try {
-      f(client)
-    } finally {
-      client.shutdown()
-    }
-
-  }
-
-  sealed trait Paging[A] {
-    def pageData: Iterator[Timed[Try[List[A]]]]
-  }
-
-  final class TablePaging(
-    val select: Ast.Select,
-    val pageData: Iterator[Timed[Try[List[JsonNode]]]]
-  ) extends Paging[JsonNode]
-
-  final class TableNamePaging(
-    val pageData: Iterator[Timed[Try[List[String]]]]
-  ) extends Paging[String]
-
-  //TODO: when projecting all fields, show hash/sort keys first?
-  def render(
-    list: Seq[JsonNode],
-    select: Seq[Ast.Projection],
-    withHeaders: Boolean = true,
-    align: Boolean = true,
-    width: Option[Int] = None
-  ): String = {
-    val headers = Repl.headers(select, list)
-    //TODO: not all fields need the same names. If All was provided in the query,
-    // alphas sort by fields present in all objects, followed by the sparse ones?
-    //TODO: match order provided if not star
-    val body = list.map { item =>
-      import scala.collection.breakOut
-      val data: Map[String, Any] = item.fields().asScala.toList.map { entry =>
-        (entry.getKey, entry.getValue)
-      }(breakOut)
-      // missing fields are represented by an empty str
-      val maxColumnLength = 40
-      val ellipsis = "..."
-      def truncate(s: String) = {
-        if (s.length > maxColumnLength)
-          s.take(maxColumnLength - ellipsis.length) + ellipsis
-        else s
-      }
-      headers.map {
-        header =>
-          Str(truncate(data.get(header).map {
-            // surround strings with quotes to differentiate them from ints
-            case s: String => s""""$s""""
-            //case list: java.util.ArrayList =>
-            //  list.asScala.take(5).toString
-            case other => other.toString
-          }.getOrElse("")))
-      }
-    }
-    if (align) {
-      val writer = new StringWriter()
-      val out = new PrintWriter(writer)
-      out.println(Table(
-        if (withHeaders) headers else Seq.empty,
-        body,
-        width
-      ))
-      writer.toString
-    } else {
-      (headers +: body)
-        .map(row => row.mkString("\t"))
-        .mkString("\n")
-    }
-  }
-
-  //TODO: improve connection errors - check dynamo listening on provided port
-
-  //TODO: parse port to int
-  def dynamoClient(endpoint: Option[String]) = {
-    val config = new ClientConfiguration()
-      .withConnectionTimeout(1.second.toMillis.toInt)
-      .withSocketTimeout(1.second.toMillis.toInt)
-    endpoint.fold(new AmazonDynamoDBClient()) { endpoint =>
-      new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
-        .withEndpoint[AmazonDynamoDBClient](endpoint)
-    }
-  }
-
-  def resetPrompt(reader: ConsoleReader) =
-    reader.setPrompt(Bold.On(Str("dql> ")).render)
-
-  def errorLine(line: String, errorIndex: Int) = {
-    val to = {
-      val t = line.indexOf('\n', errorIndex)
-      if (t == -1) line.size
-      else t
-    }
-    val from = {
-      val f = line.lastIndexOf('\n', errorIndex)
-      if (f == -1) 0
-      else f + 1
-    }
-    (errorIndex - from, line.substring(from, to))
-  }
-
-  def parseError(line: String, failure: ParseException) = {
-    failure match {
-      case ParseError(error) =>
-        val (errorIndex, lineWithError) = errorLine(line, error.index)
-
-        //TODO: improve error output - use fastparse error
-        s"""${formatError("Failed to parse query")}
-           |${Color.Red(lineWithError)}
-           |${(" " * errorIndex) + "^"}""".stripMargin
-      case error: UnAggregatedFieldsError =>
-        formatError(error.getMessage)
-    }
-  }
-
-  def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
 
 }
 

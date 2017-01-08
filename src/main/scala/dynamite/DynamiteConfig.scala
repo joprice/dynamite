@@ -1,30 +1,63 @@
 package dynamite
 
 import java.io.File
-import scala.util.{ Try, Success }
+import java.nio.charset.StandardCharsets
+import java.nio.file.{ Files, Paths, StandardOpenOption }
+
+import scala.util.{ Success, Try }
 import com.typesafe.config.ConfigFactory
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ArbitraryTypeReader._
+import net.ceedubs.ficus.readers.ValueReader
 
-final case class DynamiteConfig(pageSize: Int = 20)
+final case class DynamiteConfig(
+  pageSize: Int = 20,
+  historyFile: File = DynamiteConfig.defaultHistoryFile
+)
 
 object DynamiteConfig {
 
-  def ensureConfigDir() = {
-    val configDir = new File(sys.props("user.home"), ".dql")
-    configDir.mkdirs()
-    configDir
+  implicit val fileValueReader: ValueReader[File] = implicitly[ValueReader[String]].map {
+    new File(_)
   }
 
+  val defaultConfigDir = new File(sys.props("user.home"), ".dynamite")
+
+  val configFileName = "config"
+
+  val defaultConfigFile = new File(defaultConfigDir, configFileName)
+
+  val defaultHistoryFile = new File(defaultConfigDir, "history")
+
+  def createDefaultConfig(configFile: File) = {
+    System.err.println(s"No config file found at ${configFile.getPath}. Creating one with default values.")
+    val defaults = DynamiteConfig()
+    val defaultConfig = s"""dynamite {
+                           |  pageSize = ${defaults.pageSize}
+                           |  historyFile = ${DynamiteConfig.defaultHistoryFile.getPath}
+                           |}
+      """.stripMargin
+    try {
+      Files.write(configFile.toPath, defaultConfig.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW)
+    } catch {
+      case _: Throwable =>
+    }
+    defaults
+  }
+
+  def parseConfig(file: File) =
+    Try {
+      ConfigFactory.parseFile(file)
+        .as[DynamiteConfig]("dynamite")
+    }
+
   def loadConfig(configDir: File): Try[DynamiteConfig] = {
-    val configFile = new File(configDir, "config")
+    configDir.mkdirs()
+    val configFile = new File(configDir, configFileName)
     if (configFile.exists) {
-      Try {
-        ConfigFactory.parseFile(configFile)
-          .as[DynamiteConfig]("dynamite")
-      }
+      parseConfig(configFile)
     } else {
-      Success(DynamiteConfig())
+      Success(createDefaultConfig(configFile))
     }
   }
 }
