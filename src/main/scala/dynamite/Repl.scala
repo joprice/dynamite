@@ -1,6 +1,7 @@
 package dynamite
 
 import java.io.{ File, PrintWriter, StringWriter }
+import java.util.concurrent.atomic.AtomicReference
 
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
@@ -22,7 +23,12 @@ import fansi._
 
 import scala.util.{ Failure, Success, Try }
 
-class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
+class Repl(
+    eval: Ast.Query => Try[Response],
+    reader: Reader,
+    out: PrintWriter,
+    format: AtomicReference[Ast.Format]
+) {
   import Repl._
 
   var paging: Paging[_] = null
@@ -67,13 +73,27 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
       paging match {
         case paging: TablePaging =>
           handle(paging) { values =>
-            out.print(render(values, paging.select.projection,
-              width = Some(reader.terminalWidth)))
+            //TODO: offer vetical printing method
+            format.get() match {
+              case Ast.Format.Json =>
+                //TODO: paginate json output to avoid flooding terminal
+                values.foreach { value =>
+                  out.println(Script.prettyPrint(value))
+                }
+              case Ast.Format.Tabular =>
+                out.print(render(
+                  values,
+                  paging.select.projection,
+                  width = Some(reader.terminalWidth)
+                ))
+            }
           }
         case paging: TableNamePaging =>
           handle(paging) { values =>
-            val headers = Seq("name")
-            out.println(Table(headers, values.map(name => Seq(Str(name))), None))
+            out.println(Table(
+              headers = Seq("name"),
+              data = values.map(name => Seq(Str(name))), None
+            ))
           }
       }
     }
@@ -126,7 +146,7 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
   }
 
   def report(query: Ast.Query, results: Response) = (query, results) match {
-    case (select: Ast.Select, Response.ResultSet(resultSet, capacity)) =>
+    case (select: Ast.Select, Response.ResultSet(resultSet, _)) =>
       // TODO: completion: success/failure, time, result count, indicate empty?
       //TODO: add flag with query cost
       paging = new TablePaging(select, resultSet)
@@ -140,13 +160,15 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
     //               |${cap.getLocalSecondaryIndexes}""".stripMargin
     //        )
     //      }
-    case (update: Ast.Update, Response.Complete) =>
+    case (_: Ast.Update, Response.Complete) =>
     //TODO: output for update / delete /ddl
     case (ShowTables, Response.TableNames(resultSet)) =>
       paging = new TableNamePaging(resultSet)
       nextPage()
     case (_: DescribeTable, description: Response.TableDescription) =>
       printTableDescription(description)
+    case (_, Response.Info(message)) =>
+      out.println(message)
     case unhandled =>
       out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
   }
@@ -231,7 +253,10 @@ object Repl {
         resetPrompt(reader)
         reader.setExpandEvents(false)
 
-        lazy val eval = Eval(client(), pageSize)
+        //TODO: load current state from config
+        val format = new AtomicReference[Ast.Format](Ast.Format.Tabular)
+
+        lazy val eval = Eval(client(), pageSize, format)
 
         val tableCache = new TableCache(Lazy(eval.describeTable))
         reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
@@ -241,7 +266,7 @@ object Repl {
         def run(query: Ast.Query) = eval.run(query)
 
         val out = new PrintWriter(reader.getOutput)
-        new Repl(run, new JLineReader(reader), out).run()
+        new Repl(run, new JLineReader(reader), out, format).run()
 
         if (client.accessed) {
           client().shutdown()

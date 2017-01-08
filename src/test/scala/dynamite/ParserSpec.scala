@@ -317,6 +317,21 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     parse("SHOW TABLES")
     parse("DESCRIBE TABLE playlist")
     parse("DELETE FROM playlists WHERE userId = 'user-id-1' AND id = 1")
+    parse("FORMAT TABULAR")
+    parse("FORMAT JSON")
+    parse("SHOW FORMAT")
+  }
+
+  it should "support describing current format" in {
+    validate("show format", DescribeTable("playlist"))
+  }
+
+  it should "support setting json format" in {
+    validate("format json", DescribeTable("playlist"))
+  }
+
+  it should "support setting tabular format" in {
+    validate("format tabular", DescribeTable("playlist"))
   }
 }
 

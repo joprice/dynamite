@@ -56,6 +56,22 @@ object Ast {
     }
   }
 
+  case object ShowFormat extends Query
+
+  final case class SetFormat(format: Format) extends Query
+
+  sealed abstract class Format extends Product with Serializable {
+    override def toString = this match {
+      case Format.Json => "json"
+      case Format.Tabular => "tabular"
+    }
+  }
+
+  object Format {
+    case object Json extends Format
+    case object Tabular extends Format
+  }
+
   sealed abstract class Value extends Product with Serializable
 
   sealed abstract class KeyValue extends Value

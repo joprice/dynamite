@@ -8,6 +8,8 @@ import scala.util.Try
 sealed abstract class Response
 
 object Response {
+  final case class Info(message: String) extends Response
+
   final case class ResultSet(
     results: Iterator[Timed[Try[List[JsonNode]]]],
     capacity: Option[() => ConsumedCapacity] = None
