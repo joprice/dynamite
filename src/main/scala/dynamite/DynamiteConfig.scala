@@ -29,6 +29,10 @@ object DynamiteConfig {
 
   val defaultHistoryFile = new File(defaultConfigDir, "history")
 
+  def write(file: File, contents: String) = Try {
+    Files.write(file.toPath, contents.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW)
+  }
+
   def createDefaultConfig(configFile: File) = {
     System.err.println(s"No config file found at ${configFile.getPath}. Creating one with default values.")
     val defaults = DynamiteConfig()
@@ -37,11 +41,7 @@ object DynamiteConfig {
                            |  historyFile = ${DynamiteConfig.defaultHistoryFile.getPath}
                            |}
       """.stripMargin
-    try {
-      Files.write(configFile.toPath, defaultConfig.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW)
-    } catch {
-      case _: Throwable =>
-    }
+    write(configFile, defaultConfig)
     defaults
   }
 
