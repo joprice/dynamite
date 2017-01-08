@@ -21,6 +21,7 @@ import dynamite.Parser.ParseException
 import dynamite.Response.KeySchema
 import fansi._
 
+import scala.collection.breakOut
 import scala.util.{ Failure, Success, Try }
 
 object Repl {
@@ -143,7 +144,6 @@ object Repl {
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
     val body = list.map { item =>
-      import scala.collection.breakOut
       val data: Map[String, Any] = item.fields().asScala.toList.map { entry =>
         (entry.getKey, entry.getValue)
       }(breakOut)

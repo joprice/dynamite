@@ -10,6 +10,7 @@ class EvalSpec
     extends FlatSpec
     with Matchers
     with DynamoSpec
+    with TryValues
     with EitherValues {
 
   val tableName = "eval-spec"
@@ -25,7 +26,7 @@ class EvalSpec
     run(query).map {
       case Response.ResultSet(result, _) =>
         val json = result.toList
-          .map(_.result.get.map(item => Json.parse(item.toString)))
+          .map(_.result.success.value.map(item => Json.parse(item.toString)))
         json should be(expected)
       case _ => ???
     }.left.map { error =>
