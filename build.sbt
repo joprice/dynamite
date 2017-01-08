@@ -62,8 +62,6 @@ scalacOptions in (Compile, compile) ++= Seq(
   //"-Ypatmat-exhaust-depth", "off"
 )
 
-scalacOptions in (Test, compile) := (scalacOptions in (Compile, compile)).value
-
 lazy val checkVersionNotes = taskKey[Unit](
 	"Checks that the notes for the next version are present to avoid build failures."
 )
