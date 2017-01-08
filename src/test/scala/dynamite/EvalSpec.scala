@@ -16,8 +16,6 @@ class EvalSpec
 
   val eval = Eval(client, 20, new AtomicReference(Ast.Format.Tabular))
 
-  final case class User(name: String)
-
   def run(query: String): Either[Throwable, Response] =
     Parser(query).flatMap(eval.run(_).toEither)
 

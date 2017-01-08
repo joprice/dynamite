@@ -20,7 +20,8 @@ libraryDependencies ++= Seq(
   "com.typesafe" % "config" % "1.3.1",
   "com.iheart" %% "ficus" % "1.4.0",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test,
-  "com.typesafe.play" %% "play-json" % "2.6.0-M1" % Test
+  "com.typesafe.play" %% "play-json" % "2.6.0-M1" % Test,
+  "org.scalamock" %% "scalamock-scalatest-support" % "3.4.2" % Test
 )
 
 dynamoDBLocalVersion := "2016-05-17"
@@ -60,6 +61,8 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Xfatal-warnings"
   //"-Ypatmat-exhaust-depth", "off"
 )
+
+scalacOptions in (Test, compile) := (scalacOptions in (Compile, compile)).value
 
 lazy val checkVersionNotes = taskKey[Unit](
 	"Checks that the notes for the next version are present to avoid build failures."

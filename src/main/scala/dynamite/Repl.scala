@@ -1,23 +1,26 @@
 package dynamite
 
-import java.io.{ File, PrintWriter, StringWriter }
+import java.io.{ Closeable, File, PrintWriter, StringWriter }
 import java.util.concurrent.atomic.AtomicReference
+
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
+import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, AmazonDynamoDBClient }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
+
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
 import dynamite.Completer.TableCache
-import dynamite.Parser.{ ParseError, ParseException, UnAggregatedFieldsError }
+import dynamite.Parser.ParseException
 import dynamite.Response.KeySchema
 import fansi._
+
 import scala.util.{ Failure, Success, Try }
 
 object Repl {
@@ -41,7 +44,7 @@ object Repl {
   def apply(client: Lazy[AmazonDynamoDBClient], config: DynamiteConfig): Unit = {
     println(s"${Opts.appName} v${BuildInfo.version}")
 
-    withReader(new ConsoleReader) { reader =>
+    withCloseable(new ConsoleReader) { reader =>
       //TODO: log to logfile in .dql
 
       withFileHistory(config.historyFile, reader) {
@@ -70,6 +73,15 @@ object Repl {
     }
   }
 
+  val ellipsis = "..."
+  val maxColumnLength = 40
+
+  def truncate(s: String) = {
+    if (s.length > maxColumnLength)
+      s.take(maxColumnLength - ellipsis.length) + ellipsis
+    else s
+  }
+
   def headers(select: Seq[Ast.Projection], data: Seq[JsonNode]): Seq[String] = {
     select.flatMap {
       case FieldSelector.All =>
@@ -81,8 +93,8 @@ object Repl {
     }
   }
 
-  def withReader[A](reader: ConsoleReader)(f: ConsoleReader => A) = {
-    try f(reader) finally reader.close()
+  def withCloseable[A <: Closeable, B](closeable: A)(f: A => B) = {
+    try f(closeable) finally closeable.close()
   }
 
   def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
@@ -95,7 +107,7 @@ object Repl {
     }
   }
 
-  def withClient[A](opts: Opts)(f: AmazonDynamoDBClient => A) = {
+  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A) = {
     val client = dynamoClient(opts.endpoint)
     try {
       f(client)
@@ -136,13 +148,6 @@ object Repl {
         (entry.getKey, entry.getValue)
       }(breakOut)
       // missing fields are represented by an empty str
-      val maxColumnLength = 40
-      val ellipsis = "..."
-      def truncate(s: String) = {
-        if (s.length > maxColumnLength)
-          s.take(maxColumnLength - ellipsis.length) + ellipsis
-        else s
-      }
       headers.map {
         header =>
           Str(truncate(data.get(header).map {
@@ -202,14 +207,14 @@ object Repl {
 
   def parseError(line: String, failure: ParseException) = {
     failure match {
-      case ParseError(error) =>
+      case ParseException.ParseError(error) =>
         val (errorIndex, lineWithError) = errorLine(line, error.index)
 
         //TODO: improve error output - use fastparse error
         s"""${formatError("Failed to parse query")}
            |${Color.Red(lineWithError)}
            |${(" " * errorIndex) + "^"}""".stripMargin
-      case error: UnAggregatedFieldsError =>
+      case error: ParseException.UnAggregatedFieldsError =>
         formatError(error.getMessage)
     }
   }
