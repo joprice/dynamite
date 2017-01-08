@@ -323,15 +323,15 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
   }
 
   it should "support describing current format" in {
-    validate("show format", DescribeTable("playlist"))
+    validate("show format", ShowFormat)
   }
 
   it should "support setting json format" in {
-    validate("format json", DescribeTable("playlist"))
+    validate("format json", SetFormat(Ast.Format.Json))
   }
 
   it should "support setting tabular format" in {
-    validate("format tabular", DescribeTable("playlist"))
+    validate("format tabular", SetFormat(Ast.Format.Tabular))
   }
 }
 

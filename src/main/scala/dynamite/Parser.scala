@@ -142,8 +142,8 @@ object Parser {
   val showTables = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
   val format: Parser[Ast.Format] = P(
-    P("tabular").map(_ => Ast.Format.Tabular) |
-      P("json").map(_ => Ast.Format.Json)
+    keyword("tabular").map(_ => Ast.Format.Tabular) |
+      keyword("json").map(_ => Ast.Format.Json)
   )
 
   val setFormat = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
