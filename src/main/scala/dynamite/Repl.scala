@@ -249,9 +249,9 @@ object Repl {
     println(s"${Opts.appName} v${BuildInfo.version}")
 
     withReader(new ConsoleReader) { reader =>
-      val configDir = Config.ensureConfigDir()
+      val configDir = DynamiteConfig.ensureConfigDir()
       //TODO: log to logfile in .dql
-      val config = Config.loadConfig(configDir).recover {
+      val config = DynamiteConfig.loadConfig(configDir).recover {
         case error: Throwable =>
           System.err.println(s"Failed to load config: ${error.getMessage}")
           sys.exit(1)

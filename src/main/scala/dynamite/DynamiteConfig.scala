@@ -9,10 +9,6 @@ import net.ceedubs.ficus.readers.ArbitraryTypeReader._
 final case class DynamiteConfig(pageSize: Int = 20)
 
 object DynamiteConfig {
-  val defaults = DynamiteConfig(20)
-}
-
-object Config {
 
   def ensureConfigDir() = {
     val configDir = new File(sys.props("user.home"), ".dql")
@@ -28,7 +24,7 @@ object Config {
           .as[DynamiteConfig]("dynamite")
       }
     } else {
-      Success(DynamiteConfig.defaults)
+      Success(DynamiteConfig())
     }
   }
 }
