@@ -172,7 +172,10 @@ class Repl(eval: Ast.Query => Try[Response], reader: Reader, out: PrintWriter) {
       } else if (trimmed.contains(";")) {
         reader.resetPrompt()
         //TODO: switch to either with custom error type for console output
-        val stripped = s"$buffer\n${line.stripSuffix(";")}"
+        val stripped = {
+          val s = trimmed.stripSuffix(";")
+          if (buffer.nonEmpty) s"$buffer\n$s" else s
+        }
         Parser(stripped)
           .fold(failure => out.println(parseError(stripped, failure)), { query =>
             eval(query) match {
@@ -352,13 +355,29 @@ object Repl {
   def resetPrompt(reader: ConsoleReader) =
     reader.setPrompt(Bold.On(Str("dql> ")).render)
 
+  def errorLine(line: String, errorIndex: Int) = {
+    val to = {
+      val t = line.indexOf('\n', errorIndex)
+      if (t == -1) line.size
+      else t
+    }
+    val from = {
+      val f = line.lastIndexOf('\n', errorIndex)
+      if (f == -1) 0
+      else f + 1
+    }
+    (errorIndex - from, line.substring(from, to))
+  }
+
   def parseError(line: String, failure: ParseException) = {
     failure match {
       case ParseError(error) =>
+        val (errorIndex, lineWithError) = errorLine(line, error.index)
+
         //TODO: improve error output - use fastparse error
         s"""${formatError("Failed to parse query")}
-           |${Color.Red(line)}
-           |${(" " * error.index) + "^"}""".stripMargin
+           |${Color.Red(lineWithError)}
+           |${(" " * errorIndex) + "^"}""".stripMargin
       case error: UnAggregatedFieldsError =>
         formatError(error.getMessage)
     }
