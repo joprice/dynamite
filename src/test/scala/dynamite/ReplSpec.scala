@@ -1,9 +1,13 @@
 package dynamite
 
 import java.io._
-
 import java.util.concurrent.atomic.AtomicReference
+
 import com.amazonaws.jmespath.ObjectMapperSingleton
+import com.amazonaws.util.json.Jackson
+import com.fasterxml.jackson.databind.JsonNode
+import dynamite.Ast.Projection
+import dynamite.Ast.Projection.FieldSelector.{ All, Field }
 import fansi.{ Bold, Str }
 import org.scalatest._
 
@@ -65,6 +69,21 @@ class ReplSpec
         |Completed in 1000 ms
         |""".stripMargin
     )
+  }
+
+  "headers" should "get unique fields from a field projection" in {
+    Repl.headers(Seq(
+      Field("id"), Field("name")
+    ), Seq( //Jackson.fromJsonString("""{"id": 1, "name": "test"}""", classOf[JsonNode])
+    )) should be(Seq("id", "name"))
+  }
+
+  it should "get unique fields from an all projection" in {
+    Repl.headers(Seq(
+      All
+    ), Seq(
+      Jackson.fromJsonString("""{"id": 1, "name": "test"}""", classOf[JsonNode])
+    )) should be(Seq("id", "name"))
   }
 
 }
