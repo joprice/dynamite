@@ -57,7 +57,7 @@ object Repl {
         lazy val eval = Eval(client(), config.pageSize, format)
 
         val tableCache = new TableCache(Lazy(eval.describeTable))
-        reader.addCompleter(Completer(reader, eval.showTables(), tableCache))
+        reader.addCompleter(Completer(reader, tableCache, eval.showTables()))
 
         // To increase repl start time, the client is initialize lazily. This save .5 second, which is
         // instead felt by the user when making the first query

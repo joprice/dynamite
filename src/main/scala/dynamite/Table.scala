@@ -14,7 +14,7 @@ object Table {
 
     val rows = headers.map(header => Bold.On(Str(header))) +: data
 
-    val colCount = rows.head.size
+    val colCount = headers.size
     val maxes = new Array[Int](colCount)
     val rowCount = rows.size
 

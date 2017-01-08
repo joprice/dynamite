@@ -14,6 +14,8 @@ final case class Opts(
 object Opts {
   val appName = "dynamite"
 
+  def parse(args: Seq[String]) = parser.parse(args, Opts())
+
   val parser = new scopt.OptionParser[Opts](appName) {
     head(appName, s"v${BuildInfo.version}")
     version("version")
