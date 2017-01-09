@@ -57,7 +57,7 @@ object Repl {
 
         lazy val eval = Eval(client(), config.pageSize, format)
 
-        val tableCache = new TableCache(Lazy(eval.describeTable))
+        val tableCache = new TableCache(table => (eval.describeTable(table)))
         reader.addCompleter(Completer(reader, tableCache, eval.showTables()))
 
         // To increase repl start time, the client is initialize lazily. This save .5 second, which is
@@ -108,14 +108,13 @@ object Repl {
     }
   }
 
-  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A) = {
+  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A): A = {
     val client = dynamoClient(opts.endpoint)
     try {
       f(client)
     } finally {
       client.shutdown()
     }
-
   }
 
   sealed trait Paging[A] {
