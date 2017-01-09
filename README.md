@@ -2,6 +2,7 @@
 
 Dynamo query REPL
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/dd21d0c56bca4a4692139a8707bd12e7)](https://www.codacy.com/app/pricejosephd/dynamite?utm_source=github.com&utm_medium=referral&utm_content=joprice/dynamite&utm_campaign=badger)
 [![CircleCI](https://circleci.com/gh/joprice/dynamite/tree/master.svg?style=svg)](https://circleci.com/gh/joprice/dynamite/tree/master)
 
 ## Installing
