@@ -10,6 +10,8 @@ class Lazy[+A](value: => A) {
   def apply() = _value
   def isEmpty = false
   def get = _value
+
+  def map[B](f: A => B): Lazy[B] = new Lazy(f(apply()))
 }
 
 object Lazy {

@@ -1,5 +1,6 @@
 package dynamite
 
+import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import dynamite.Ast.{ Query, ReplCommand }
 import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
 import org.scalatest._
@@ -14,11 +15,9 @@ class EvalSpec
 
   val tableName = "eval-spec"
 
-  val eval = Eval(client, 20)
-
   def run(query: String): Either[Throwable, Response] =
     Parser(query).flatMap {
-      case result: Query => eval.run(result).toEither
+      case result: Query => Eval(new DynamoDB(client), result, 20).toEither
       case _: ReplCommand => ???
     }
 
