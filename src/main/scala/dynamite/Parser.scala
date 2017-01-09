@@ -157,12 +157,15 @@ object Parser {
 
   sealed abstract class ParseException(message: String, cause: Option[Throwable])
     extends Exception(message, cause.orNull)
-  final case class ParseError(failure: Parsed.Failure) extends ParseException(
-    "Failed parsing query", Some(fastparse.core.ParseError(failure))
-  )
-  final case class UnAggregatedFieldsError(fields: Seq[String]) extends ParseException(
-    "Aggregates may not be used with unaggregated fields", None
-  )
+
+  object ParseException {
+    final case class ParseError(failure: Parsed.Failure) extends ParseException(
+      "Failed parsing query", Some(fastparse.core.ParseError(failure))
+    )
+    final case class UnAggregatedFieldsError(fields: Seq[String]) extends ParseException(
+      "Aggregates may not be used with unaggregated fields", None
+    )
+  }
 
   def validate(query: Query): Either[ParseException, Query] = query match {
     case select: Select =>
@@ -172,7 +175,7 @@ object Parser {
         case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
       }
       if (aggs.nonEmpty && fields.nonEmpty) {
-        Left(UnAggregatedFieldsError(fields))
+        Left(ParseException.UnAggregatedFieldsError(fields))
       } else {
         Right(select)
       }
@@ -185,7 +188,7 @@ object Parser {
     query.parse(input) match {
       case Success(select: Select, _) => validate(select)
       case Success(value, _) => Right(value)
-      case failure: Failure[_, _] => Left(ParseError(failure))
+      case failure: Failure[_, _] => Left(ParseException.ParseError(failure))
     }
   }
 }

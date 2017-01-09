@@ -61,28 +61,32 @@ object Seed {
       "id" -> 1,
       "name" -> "Chill Times",
       "dateCreated" -> 1,
-      "duration" -> 10
+      "duration" -> 10,
+      "tracks" -> List(1, 2, 3)
     ),
     Json.obj(
       "userId" -> "user-id-1",
       "id" -> 2,
       "name" -> "EDM4LYFE",
       "dateCreated" -> 2,
-      "duration" -> 10
+      "duration" -> 10,
+      "tracks" -> List(1, 2, 3)
     ),
     Json.obj(
       "userId" -> "user-id-2",
       "id" -> 3,
       "name" -> "Disco Fever",
       "dateCreated" -> 3,
-      "duration" -> 5
+      "duration" -> 5,
+      "tracks" -> List(1, 2, 3)
     ),
     Json.obj(
       "userId" -> "user-id-3",
       "id" -> 4,
       "name" -> "Top Pop",
       "dateCreated" -> 4,
-      "duration" -> 1
+      "duration" -> 1,
+      "tracks" -> List(1, 2, 3)
     )
   )
 
