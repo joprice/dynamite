@@ -53,12 +53,12 @@ object Completer {
     case (_, table) => table
   }
 
-  class TableCache(describeTables: Lazy[String => Try[TableDescription]]) {
+  class TableCache(describeTables: String => Try[TableDescription]) {
     private[this] val tableNameCache = TrieMap[String, TableDescription]()
 
     def get(tableName: String): Option[TableDescription] = {
       tableNameCache.get(tableName).orElse {
-        describeTables()(tableName).toOption.map { result =>
+        describeTables(tableName).toOption.map { result =>
           tableNameCache.put(tableName, result)
           result
         }
