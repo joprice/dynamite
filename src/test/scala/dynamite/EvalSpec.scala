@@ -2,7 +2,7 @@ package dynamite
 
 import java.util.concurrent.atomic.AtomicReference
 
-import dynamite.Eval.AmbiguousIndexException
+import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
 import org.scalatest._
 import play.api.libs.json.Json
 
@@ -45,6 +45,15 @@ class EvalSpec
 
   it should "allow selecting all fields" in {
     validate(s"select * from $tableName", List(Seed.seedData))
+  }
+
+  it should "allow explicit ascending order" in {
+    validate(
+      s"select * from $tableName where userId = 'user-id-1' asc", List(
+        Seed.seedData
+          .filter(json => (json \ "userId").as[String] == "user-id-1")
+      )
+    )
   }
 
   it should "allow reversing the results " in {
@@ -104,7 +113,7 @@ class EvalSpec
   it should "support inserting a record" in {
     val newName = "Throwback Thursday"
     run(
-      s"""insert into $tableName (userId, id, name) values ('user-id-1', 20, "$newName")"""
+      s"""insert into $tableName (userId, id, name, tracks) values ('user-id-1', 20, "$newName", [1,2,3])"""
     )
     validate(
       s"select name from $tableName where userId = 'user-id-1' and id = 20", List(List(
@@ -131,8 +140,14 @@ class EvalSpec
     )))
   }
 
+  it should "fail when table is unknown" in {
+    run(
+      s"select id from unknown-table where userId = 'user-id-1' and name = 'EDM4LYFE'"
+    ).left.value shouldBe an[UnknownTableException]
+  }
+
   it should "return ambiguous index error" in {
-    run(s"select id from $tableName where userId = 'user-id-1' and duration = 10").left.value shouldBe a[AmbiguousIndexException]
+    run(s"select id from $tableName where userId = 'user-id-1' and duration = 10").left.value shouldBe an[AmbiguousIndexException]
   }
 
   it should "use an explicit index when provided" in {
@@ -165,4 +180,13 @@ class EvalSpec
       "Aggregates may not be used with unaggregated fields"
     )
   }
+
+  it should "return consumed cacpacity" in {
+    run(
+      s"select count(*) from $tableName where userId = 'user-id-1'"
+    ).right.value should matchPattern {
+        case Response.ResultSet(results, Some(_)) =>
+      }
+  }
+
 }
