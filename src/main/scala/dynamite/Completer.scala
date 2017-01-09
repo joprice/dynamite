@@ -5,10 +5,12 @@ import java.nio.file.{ Files, Paths, StandardOpenOption }
 import dynamite.Response.{ TableDescription, TableNames }
 import jline.console.ConsoleReader
 import jline.console.completer._
-
+import Parser._
+import fastparse.all._
 import scala.util.Try
 import scala.collection.JavaConverters._
 import scala.collection.concurrent.TrieMap
+import fastparse.core.Parsed.Success
 
 object Completer {
   def literal(values: String*) = new StringsCompleter(values: _*)
@@ -47,13 +49,8 @@ object Completer {
     }
   }
 
-  val tableParser = {
-    import Parser._
-    import fastparse.all._
-
-    ((space.rep ~ projection ~ spaces) ~ from).map {
-      case (_, table) => table
-    }
+  val tableParser = ((keyword("select") ~/ spaces ~ projections ~ spaces) ~ from).map {
+    case (_, table) => table
   }
 
   class TableCache(describeTables: Lazy[String => Try[TableDescription]]) {
@@ -74,7 +71,6 @@ object Completer {
       tableCache: TableCache
   ) extends Completer {
     def keyNames(reader: ConsoleReader) = {
-      import fastparse.core.Parsed.Success
       tableParser.parse(reader.getCursorBuffer.buffer.toString) match {
         case Success(name, _) => Some(name)
         case _ => None
