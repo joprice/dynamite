@@ -10,6 +10,13 @@ scalaVersion := "2.12.1"
 
 mainClass in Compile := Some("dynamite.Main")
 
+addCommandAlias("validate", Seq(
+  "clean",
+  "coverage",
+  "test",
+  "coverageReport"
+).mkString(";", ";", ""))
+
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "0.4.2",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.76",

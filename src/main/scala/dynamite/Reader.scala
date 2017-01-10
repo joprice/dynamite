@@ -1,8 +1,15 @@
 package dynamite
 
+import fansi.{ Bold, Str }
 import jline.console.ConsoleReader
 
 trait Reader {
+
+  def resetPagination() = {
+    enableEcho()
+    resetPrompt()
+  }
+
   def terminalWidth: Int
 
   def disableEcho(): Unit
@@ -28,7 +35,7 @@ class JLineReader(reader: ConsoleReader) extends Reader {
 
   def clearPrompt(): Unit = reader.setPrompt("")
 
-  def resetPrompt(): Unit = Repl.resetPrompt(reader)
+  def resetPrompt(): Unit = reader.setPrompt(Bold.On(Str("dql> ")).render)
 
   def readCharacter(): Int = reader.readCharacter()
 

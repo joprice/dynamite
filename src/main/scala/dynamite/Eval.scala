@@ -18,11 +18,7 @@ import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
 
 object Eval {
-  def apply[A](
-    client: AmazonDynamoDB,
-    pageSize: Int,
-    format: AtomicReference[Ast.Format]
-  ) = new Eval(client, pageSize, format)
+  def apply[A](client: AmazonDynamoDB, pageSize: Int) = new Eval(client, pageSize)
 
   def jsonNode(item: Item) = Jackson.jsonNodeOf(item.toJSON)
 
@@ -126,6 +122,19 @@ object Eval {
       } else Iterator.empty.next()
   }
 
+  class TimedRecoveringIterator[A](
+      original: Iterator[A]
+  ) extends Iterator[Timed[Try[A]]] {
+    private[this] val recovering = new RecoveringIterator[A](original)
+
+    def next() = Timed {
+      recovering.next()
+    }
+
+    def hasNext = recovering.hasNext
+
+  }
+
   class TableIterator[A](
       select: Select,
       original: Iterator[Iterator[JsonNode]]
@@ -144,20 +153,12 @@ object Eval {
 
 import Response._
 
-class Eval(
-    client: AmazonDynamoDB,
-    pageSize: Int,
-    format: AtomicReference[Ast.Format]
-) {
+class Eval(client: AmazonDynamoDB, pageSize: Int) {
   import Eval._
 
   val dynamo = new DynamoDB(client)
 
   def run(query: Query): Try[Response] = query match {
-    case SetFormat(format) =>
-      this.format.set(format)
-      Success(Response.Info(s"Format set to $format"))
-    case ShowFormat => Success(Response.Info(format.get().toString))
     case query: Select => select(query)
     case query: Update => update(query)
     case query: Delete => delete(query)
@@ -211,12 +212,11 @@ class Eval(
   }
 
   def showTables(): Try[TableNames] = Try {
-    val it = dynamo.listTables().pages().iterator().asScala.map {
-      _.iterator().asScala
+    //TODO: time by page, and sum?
+    def it = dynamo.listTables().pages().iterator().asScala.map {
+      _.iterator().asScala.map(_.getTableName).toList
     }
-    TableNames(new RecoveringIterator(it).map {
-      value => Timed(value.map(_.toList.map(_.getTableName)))
-    })
+    TableNames(new TimedRecoveringIterator(it))
   }
 
   def insert(query: Insert): Try[Complete.type] = Try {

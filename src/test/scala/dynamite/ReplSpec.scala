@@ -1,14 +1,10 @@
 package dynamite
 
 import java.io._
-import java.util.concurrent.atomic.AtomicReference
-
 import com.amazonaws.jmespath.ObjectMapperSingleton
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.FieldSelector.{ All, Field }
-import dynamite.Parser.ParseException.{ ParseError, UnAggregatedFieldsError }
 import fansi.{ Bold, Color, Str }
 import org.scalatest._
 import jline.internal.Ansi
@@ -34,16 +30,121 @@ class ReplSpec
     val query = s"select * from playlists limit 1;"
     val writer = new StringWriter()
     withReader(query) { reader =>
-      val repl = new Repl(
-        _ => Failure(new Exception("fail")),
-        reader,
+      Repl.loop(
+        "",
         new PrintWriter(writer),
-        new AtomicReference(Ast.Format.Tabular)
+        reader,
+        Ast.Format.Tabular,
+        _ => Failure(new Exception("fail"))
       )
-      repl.run()
     }
     writer.toString should be(
       s"""${Repl.formatError("fail")}
+        |""".stripMargin
+    )
+  }
+
+  it should "handle multiline queries" in {
+    val query =
+      """select * from playlists
+        |
+        |
+        |limit 1;
+      """.stripMargin
+    val writer = new StringWriter()
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular,
+        _ => Failure(new Exception("fail"))
+      )
+    }
+    writer.toString should be(
+      s"""${Repl.formatError("fail")}
+         |""".stripMargin
+    )
+  }
+
+  it should "paginate results" in {
+    val writer = new StringWriter()
+    val query = s"select * from playlists where userId = 'user-id-1';"
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular,
+        _ => Try(
+          Response.ResultSet(
+            Iterator(
+              Timed(Success(List {
+                val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                node.put("id", "abc")
+                node.put("size", 2)
+              }), 1.second),
+              Timed(Success(List {
+                val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                node.put("id", "def")
+                node.put("size", 2)
+              }), 1.second)
+            )
+          )
+        )
+      )
+    }
+    writer.toString should be(
+      s"""${Bold.On("id")}      ${Bold.On("size")}
+         |"abc"   2
+         |
+         |Completed in 1000 ms
+         |Press q to quit, any key to load next page.
+         |${Bold.On("id")}      ${Bold.On("size")}
+         |"def"   2
+         |
+         |Completed in 1000 ms
+         |""".stripMargin
+    )
+  }
+
+  it should "render results in json" in {
+    val writer = new StringWriter()
+    val query =
+      s"""format json;
+          select * from playlists where userId = 'user-id-1';""".stripMargin
+
+    val format = Ast.Format.Tabular
+
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        format,
+        {
+          _ =>
+            Try(
+              Response.ResultSet(
+                Iterator(
+                  Timed(Success(List {
+                    val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                    node.put("id", "abc")
+                    node.put("size", 2)
+                  }), 1.second)
+                )
+              )
+            )
+        }
+      )
+    }
+    writer.toString should be(
+      """Format set to json
+        |{
+        |  "id": "abc",
+        |  "size": 2
+        |}
+        |Completed in 1000 ms
         |""".stripMargin
     )
   }
@@ -52,7 +153,11 @@ class ReplSpec
     val writer = new StringWriter()
     val query = s"select count(*) from playlists where userId = 'user-id-1' ;"
     withReader(query) { reader =>
-      val repl = new Repl(
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular,
         _ => Try(
           Response.ResultSet(
             Iterator.single(Timed(Success(List {
@@ -60,15 +165,12 @@ class ReplSpec
               node.put("count", 20)
             }), 1.second))
           )
-        ),
-        reader,
-        new PrintWriter(writer),
-        new AtomicReference(Ast.Format.Tabular)
-      ).run()
+        )
+      )
     }
     writer.toString should be(
       s"""${Bold.On(Str("count"))}
-        |20 ${"  "}
+        |20
         |
         |Completed in 1000 ms
         |""".stripMargin

@@ -1,8 +1,5 @@
 package dynamite
 
-import com.amazonaws.ClientConfiguration
-import com.amazonaws.auth.BasicAWSCredentials
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import org.scalatest._
 import scala.concurrent.duration._
@@ -14,11 +11,7 @@ trait DynamoTestClient {
     throw new Exception(s"Failed to find $dynamoPortKey")
   }
 
-  lazy val config = new ClientConfiguration()
-    .withConnectionTimeout(1.second.toMillis.toInt)
-    .withSocketTimeout(1.second.toMillis.toInt)
-  lazy val client = new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
-    .withEndpoint[AmazonDynamoDBClient](s"http://localhost:$dynamoPort")
+  lazy val client = Repl.dynamoClient(Some(s"http://localhost:$dynamoPort"))
 }
 
 trait DynamoSpec

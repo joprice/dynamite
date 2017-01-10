@@ -2,6 +2,7 @@ package dynamite
 
 import java.util.concurrent.atomic.AtomicReference
 
+import dynamite.Ast.{ Query, ReplCommand }
 import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -15,10 +16,13 @@ class EvalSpec
 
   val tableName = "eval-spec"
 
-  val eval = Eval(client, 20, new AtomicReference(Ast.Format.Tabular))
+  val eval = Eval(client, 20)
 
   def run(query: String): Either[Throwable, Response] =
-    Parser(query).flatMap(eval.run(_).toEither)
+    Parser(query).flatMap {
+      case result: Query => eval.run(result).toEither
+      case _: ReplCommand => ???
+    }
 
   //TODO test non-existent table
 
