@@ -2,7 +2,27 @@ package dynamite
 
 object Ast {
 
-  sealed abstract class Query extends Product with Serializable
+  sealed abstract class Command extends Product with Serializable
+
+  sealed abstract class ReplCommand extends Command
+
+  case object ShowFormat extends ReplCommand
+
+  final case class SetFormat(format: Format) extends ReplCommand
+
+  sealed abstract class Format extends Product with Serializable {
+    override def toString = this match {
+      case Format.Json => "json"
+      case Format.Tabular => "tabular"
+    }
+  }
+
+  object Format {
+    case object Json extends Format
+    case object Tabular extends Format
+  }
+
+  sealed abstract class Query extends Command
 
   final case class Select(
     projection: Seq[Projection],
@@ -54,22 +74,6 @@ object Ast {
       final case class Field(name: String) extends FieldSelector
       case object All extends FieldSelector
     }
-  }
-
-  case object ShowFormat extends Query
-
-  final case class SetFormat(format: Format) extends Query
-
-  sealed abstract class Format extends Product with Serializable {
-    override def toString = this match {
-      case Format.Json => "json"
-      case Format.Tabular => "tabular"
-    }
-  }
-
-  object Format {
-    case object Json extends Format
-    case object Tabular extends Format
   }
 
   sealed abstract class Value extends Product with Serializable

@@ -33,8 +33,8 @@ object Table {
           val max = maxes(i)
           val size = col.length
           val rendered = col.render
-          if (size < max) rendered + (" " * (max - size)) else rendered
-      }.mkString("\t")
+          if (size < max && i < row.size - 1) rendered + (" " * (max - size)) else rendered
+      }.mkString(" " * 3)
       out.println(output)
     }
 

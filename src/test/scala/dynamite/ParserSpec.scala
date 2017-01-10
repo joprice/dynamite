@@ -16,7 +16,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     result.right.value
   }
 
-  def validate(query: String, expected: Query) = {
+  def validate(query: String, expected: Command) = {
     parse(query) should be(expected)
   }
 
