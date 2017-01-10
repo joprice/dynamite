@@ -11,7 +11,7 @@ object Ast {
   final case class SetFormat(format: Format) extends ReplCommand
 
   sealed abstract class Format extends Product with Serializable {
-    override def toString = this match {
+    override def toString: String = this match {
       case Format.Json => "json"
       case Format.Tabular => "tabular"
     }
@@ -84,7 +84,7 @@ object Ast {
 
   /**
    * NOTE: The constructors of IntValue and FloatValue keep their original string
-   * original representatio for debugging purposes.
+   * original representation for debugging purposes.
    */
   sealed abstract class NumberValue(val value: Number) extends KeyValue
   final case class IntValue(repr: String) extends NumberValue(BigInt(repr))

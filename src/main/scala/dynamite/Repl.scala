@@ -1,8 +1,6 @@
 package dynamite
 
 import java.io.{ Closeable, File, PrintWriter, StringWriter }
-import java.util.concurrent.atomic.AtomicReference
-
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, AmazonDynamoDBClient }
@@ -412,7 +410,7 @@ object Repl {
   def errorLine(line: String, errorIndex: Int) = {
     val to = {
       val t = line.indexOf('\n', errorIndex)
-      if (t == -1) line.size
+      if (t == -1) line.length
       else t
     }
     val from = {

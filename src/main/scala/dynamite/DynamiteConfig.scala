@@ -2,7 +2,7 @@ package dynamite
 
 import java.io.File
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Paths, StandardOpenOption }
+import java.nio.file.{ Files, StandardOpenOption }
 
 import scala.util.{ Success, Try }
 import com.typesafe.config.ConfigFactory

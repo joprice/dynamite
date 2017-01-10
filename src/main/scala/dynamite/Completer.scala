@@ -124,7 +124,7 @@ object Completer {
       new ArgumentCompleter(
         literal("insert"),
         literal("into"),
-        tableNames, //TODO: fields completer, irgnoring commas and parens
+        tableNames, //TODO: fields completer, ignoring commas and parentheses
         //literal("values"),
         Null
       ),

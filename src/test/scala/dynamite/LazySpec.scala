@@ -10,6 +10,7 @@ class LazySpec
   "lazy" should "not eval its argument until accessed" in {
     var test = false
     val l = Lazy(test = true)
+    l.accessed
     test shouldBe false
   }
 

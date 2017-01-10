@@ -1,7 +1,5 @@
 package dynamite
 
-import java.util.concurrent.atomic.AtomicReference
-
 import dynamite.Ast.{ Query, ReplCommand }
 import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
 import org.scalatest._
@@ -105,7 +103,6 @@ class EvalSpec
   }
 
   it should "support deleting a record" in {
-    val newName = "Chill Timez"
     run(
       s"delete from $tableName where userId = 'user-id-1' and id = 1"
     )
@@ -189,7 +186,7 @@ class EvalSpec
     run(
       s"select count(*) from $tableName where userId = 'user-id-1'"
     ).right.value should matchPattern {
-        case Response.ResultSet(results, Some(_)) =>
+        case Response.ResultSet(_, Some(_)) =>
       }
   }
 
