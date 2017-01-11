@@ -1,7 +1,5 @@
 package dynamite
 
-import java.util.concurrent.atomic.AtomicReference
-
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
@@ -93,7 +91,7 @@ object Eval {
 
   def recoverQuery[A](table: String, result: Try[A]) = {
     result.recoverWith {
-      case ex: ResourceNotFoundException =>
+      case _: ResourceNotFoundException =>
         Failure(new Exception(s"Table '$table' does not exist"))
     }
   }

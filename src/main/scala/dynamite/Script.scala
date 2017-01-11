@@ -1,17 +1,10 @@
 package dynamite
 
-import java.util.concurrent.atomic.AtomicReference
-import java.util.stream.Collectors
-
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.fasterxml.jackson.core.{ JsonGenerator, PrettyPrinter }
-import com.fasterxml.jackson.core.util.DefaultPrettyPrinter
-import com.fasterxml.jackson.core.util.DefaultPrettyPrinter.Lf2SpacesIndenter
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast._
 import jline.internal.Ansi
-
 import scala.util.{ Failure, Success, Try }
 
 object Script {
@@ -86,7 +79,7 @@ object Script {
                 //TODO: format tables output
                 Console.out.println(names.mkString("\n"))
                 Right(())
-              //TODO: print update/delete success/failiure
+              //TODO: print update/delete success/failure
               case (DescribeTable(_), Response.TableNames(_)) =>
                 Right(())
               case (_, Response.Info(message)) =>

@@ -1,11 +1,10 @@
 package dynamite
 
-import java.io.{ ByteArrayInputStream, ByteArrayOutputStream }
+import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.model.{ AttributeValue, ScanRequest, ScanResult }
-import jline.internal.Ansi
 import org.scalatest._
 import org.scalamock.scalatest.MockFactory
 

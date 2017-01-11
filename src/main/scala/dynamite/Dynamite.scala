@@ -2,7 +2,7 @@ package dynamite
 
 import java.util.stream.Collectors
 
-object Main {
+object Dynamite {
 
   def main(args: Array[String]): Unit = {
     Opts.parse(args) match {

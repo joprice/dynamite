@@ -10,7 +10,7 @@ class TestReader(line: String) extends Reader {
     )
   )
 
-  def close() = in.close()
+  def close(): Unit = in.close()
 
   def terminalWidth = 100
   def enableEcho(): Unit = ()
