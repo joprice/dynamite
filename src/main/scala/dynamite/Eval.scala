@@ -1,7 +1,6 @@
 package dynamite
 
 import com.amazonaws.jmespath.ObjectMapperSingleton
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
 import com.amazonaws.services.dynamodbv2.document.spec._
 import dynamite.Ast.{ PrimaryKey => _, _ }
@@ -9,14 +8,24 @@ import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription =
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
-import dynamite.Response.ResultSet
+import dynamite.Response._
 
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.util.{ Failure, Success, Try }
 
 object Eval {
-  def apply[A](client: AmazonDynamoDB, pageSize: Int) = new Eval(client, pageSize)
+
+  def apply(dynamo: DynamoDB, query: Query, pageSize: Int): Try[Response] = {
+    query match {
+      case query: Select => select(dynamo, query, pageSize)
+      case query: Update => update(dynamo, query)
+      case query: Delete => delete(dynamo, query)
+      case query: Insert => insert(dynamo, query)
+      case ShowTables => showTables(dynamo)
+      case DescribeTable(table) => describeTable(dynamo, table)
+    }
+  }
 
   def jsonNode(item: Item) = Jackson.jsonNodeOf(item.toJSON)
 
@@ -147,25 +156,8 @@ object Eval {
     def hasNext = recovering.hasNext
 
   }
-}
 
-import Response._
-
-class Eval(client: AmazonDynamoDB, pageSize: Int) {
-  import Eval._
-
-  val dynamo = new DynamoDB(client)
-
-  def run(query: Query): Try[Response] = query match {
-    case query: Select => select(query)
-    case query: Update => update(query)
-    case query: Delete => delete(query)
-    case query: Insert => insert(query)
-    case ShowTables => showTables()
-    case DescribeTable(table) => describeTable(table)
-  }
-
-  def describeTable(tableName: String): Try[TableDescription] = Try {
+  def describeTable(dynamo: DynamoDB, tableName: String): Try[TableDescription] = Try {
     val description = dynamo.getTable(tableName).describe()
     val attributes = description.getAttributeDefinitions.asScala.map { definition =>
       definition.getAttributeName -> definition.getAttributeType
@@ -209,7 +201,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
     TableDescription(tableName, key.get, range, schemas)
   }
 
-  def showTables(): Try[TableNames] = Try {
+  def showTables(dynamo: DynamoDB): Try[TableNames] = Try {
     //TODO: time by page, and sum?
     def it = dynamo.listTables().pages().iterator().asScala.map {
       _.iterator().asScala.map(_.getTableName).toList
@@ -217,7 +209,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
     TableNames(new TimedRecoveringIterator(it))
   }
 
-  def insert(query: Insert): Try[Complete.type] = Try {
+  def insert(dynamo: DynamoDB, query: Insert): Try[Complete.type] = Try {
     dynamo.getTable(query.table).putItem(
       query.values.foldLeft(new Item()) {
         case (item, (field, value)) => item.`with`(field, unwrap(value))
@@ -227,7 +219,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
   }
 
   //TODO: condition expression that item must exist?
-  def delete(query: Delete): Try[Complete.type] = Try {
+  def delete(dynamo: DynamoDB, query: Delete): Try[Complete.type] = Try {
     dynamo.getTable(query.table).deleteItem(toDynamoKey(query.key))
     Complete
     //TODO: optionally return consumed capacity
@@ -235,7 +227,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
   }
 
   //TODO: change response to more informative type
-  def update(query: Update): Try[Complete.type] = {
+  def update(dynamo: DynamoDB, query: Update): Try[Complete.type] = {
     recoverQuery(query.table, Try {
       val table = dynamo.getTable(query.table)
       val Ast.PrimaryKey(hash, range) = query.key
@@ -259,7 +251,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
     })
   }
 
-  def select(query: Select): Try[ResultSet] = Try {
+  def select(dynamo: DynamoDB, query: Select, pageSize: Int): Try[ResultSet] = Try {
     def wrap[A](results: ItemCollection[A]) = {
       import scala.collection.breakOut
       val it = results.pages.iterator()
@@ -297,7 +289,7 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
 
       def assumeIndex = {
         //TODO: cache this
-        val grouped = describeTable(query.from).getOrElse {
+        val grouped = describeTable(dynamo, query.from).getOrElse {
           throw UnknownTableException(query.from)
         }.indexes.groupBy { index =>
           (index.hash.name, index.range.map(_.name))
@@ -379,6 +371,5 @@ class Eval(client: AmazonDynamoDB, pageSize: Int) {
 
     applyAggregates(aggregates, results)
   }
-
 }
 

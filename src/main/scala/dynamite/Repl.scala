@@ -1,8 +1,10 @@
 package dynamite
 
 import java.io.{ Closeable, File, PrintWriter, StringWriter }
+
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
+import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, AmazonDynamoDBClient }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.fasterxml.jackson.databind.JsonNode
@@ -284,17 +286,18 @@ object Repl {
 
     withCloseable(new ConsoleReader) { reader =>
       withFileHistory(config.historyFile, reader) {
-        lazy val eval = Eval(client(), config.pageSize)
         // To increase repl start time, the client is initialize lazily. This save .5 second, which is
         // instead felt by the user when making the first query
-        def run(query: Ast.Query) = eval.run(query)
+        val wrapped = client.map(new DynamoDB(_))
 
-        val tableCache = new TableCache(table => eval.describeTable(table))
+        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize)
+
+        val tableCache = new TableCache(table => Eval.describeTable(wrapped(), table))
 
         val jLineReader = new JLineReader(reader)
         jLineReader.resetPrompt()
         reader.setExpandEvents(false)
-        reader.addCompleter(Completer(reader, tableCache, eval.showTables()))
+        reader.addCompleter(Completer(reader, tableCache, Eval.showTables(wrapped())))
 
         val out = new PrintWriter(reader.getOutput)
 

@@ -2,31 +2,26 @@ package dynamite
 
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
+import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast._
 import jline.internal.Ansi
+
 import scala.util.{ Failure, Success, Try }
 
 object Script {
 
   // paginate through the results, exiting at the first failure and printing as each page is processed
-  def render(
-    format: Format,
-    projection: Seq[Ast.Projection],
-    data: Iterator[Timed[Try[List[JsonNode]]]]
-  ) = {
+  def render[A](
+    data: Iterator[Timed[Try[List[A]]]]
+  )(f: (Seq[A], Boolean) => String): Either[String, Unit] = {
     // paginate through the results, exiting at the first failure and printing as each page is processed
     var first = true
     var result: Either[String, Unit] = Right(())
     while (result.isRight && data.hasNext) {
       data.next().result match {
         case Success(values) =>
-          val output = renderPage(
-            format,
-            values,
-            projection,
-            first
-          )
+          val output = f(values, first)
           Console.out.println(output)
           result = Right(())
         case Failure(ex) =>
@@ -70,20 +65,28 @@ object Script {
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, {
       case query: Query =>
-        Eval(client, 20).run(query) match {
+        Eval(new DynamoDB(client), query, 20) match {
           case Success(results) =>
             (query, results) match {
               case (select: Ast.Select, Response.ResultSet(pages, _)) =>
-                render(opts.format, select.projection, pages)
+                render(pages) { (values, first) =>
+                  renderPage(
+                    opts.format,
+                    values,
+                    select.projection,
+                    first
+                  )
+                }
               case (ShowTables, Response.TableNames(names)) =>
                 //TODO: format tables output
-                Console.out.println(names.mkString("\n"))
-                Right(())
+                render(names) { (page, _) =>
+                  page.mkString("\n")
+                }
               //TODO: print update/delete success/failure
               case (DescribeTable(_), Response.TableNames(_)) =>
                 Right(())
               case (_, Response.Info(message)) =>
-                Console.out.println(message)
+                println(message)
                 Right(())
               case unhandled => Left(s"unhandled response $unhandled")
             }

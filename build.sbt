@@ -8,7 +8,7 @@ buildInfoPackage := "dynamite"
 
 scalaVersion := "2.12.1"
 
-mainClass in Compile := Some("dynamite.Main")
+mainClass in Compile := Some("dynamite.Dynamite")
 
 addCommandAlias("validate", Seq(
   "clean",
