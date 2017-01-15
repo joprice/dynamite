@@ -112,6 +112,40 @@ class ReplSpec
     )
   }
 
+  it should "handle failing pagination" in {
+    val writer = new StringWriter()
+    val query = s"select * from playlists where userId = 'user-id-1';"
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular,
+        _ => Try(
+          Response.ResultSet(
+            Iterator(
+              Timed(Success(List {
+                val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                node.put("id", "abc")
+                node.put("size", 2)
+              }), 1.second),
+              Timed(Failure(new Exception("second page failed")))
+            )
+          )
+        )
+      )
+    }
+    Ansi.stripAnsi(writer.toString) should be(
+      s"""id      size
+         |"abc"   2
+         |
+         |Completed in 1000 ms
+         |Press q to quit, any key to load next page.
+         |[error] second page failed
+         |""".stripMargin
+    )
+  }
+
   it should "render results in json" in {
     val writer = new StringWriter()
     val query =
@@ -252,7 +286,7 @@ class ReplSpec
         new PrintWriter(writer),
         reader,
         Ast.Format.Tabular, {
-          case DescribeTable(table) =>
+          case DescribeTable("playlists") =>
             Success(Response.TableDescription(
               "playlists",
               KeySchema("id", ScalarAttributeType.S),
@@ -261,9 +295,7 @@ class ReplSpec
                 Index(
                   "by_image",
                   KeySchema("image", ScalarAttributeType.B),
-                  Some(
-                    KeySchema("id", ScalarAttributeType.S)
-                  )
+                  None
                 ),
                 Index(
                   "by_created_date",
@@ -287,7 +319,7 @@ class ReplSpec
         |
         |indexes
         |name              hash                    range
-        |by_image          image [binary]          id [string]
+        |by_image          image [binary]${"       "}
         |by_created_date   created_date [number]   id [string]
         |
         |""".stripMargin
