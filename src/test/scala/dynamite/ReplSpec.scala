@@ -1,10 +1,14 @@
 package dynamite
 
 import java.io._
+
 import com.amazonaws.jmespath.ObjectMapperSingleton
+import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
+import dynamite.Ast.DescribeTable
 import dynamite.Ast.Projection.FieldSelector.{ All, Field }
+import dynamite.Response.{ Index, KeySchema }
 import fansi.{ Bold, Color, Str }
 import org.scalatest._
 import jline.internal.Ansi
@@ -237,6 +241,56 @@ class ReplSpec
                     |fron playlist
                     |^""".stripMargin
     Ansi.stripAnsi(error) shouldBe result
+  }
+
+  "printTableDescription" should "print a list of table schemas" in {
+    val query = "describe table playlists;"
+    val writer = new StringWriter()
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular, {
+          case DescribeTable(table) =>
+            Success(Response.TableDescription(
+              "playlists",
+              KeySchema("id", ScalarAttributeType.S),
+              None,
+              Seq(
+                Index(
+                  "by_image",
+                  KeySchema("image", ScalarAttributeType.B),
+                  Some(
+                    KeySchema("id", ScalarAttributeType.S)
+                  )
+                ),
+                Index(
+                  "by_created_date",
+                  KeySchema(
+                    "created_date", ScalarAttributeType.N
+                  ),
+                  Some(
+                    KeySchema("id", ScalarAttributeType.S)
+                  )
+                )
+              )
+            ))
+          case _ => ???
+        }
+      )
+    }
+    Ansi.stripAnsi(writer.toString) shouldBe
+      s"""schema
+        |name        hash          range
+        |playlists   id [string]
+        |
+        |indexes
+        |name              hash                    range
+        |by_image          image [binary]          id [string]
+        |by_created_date   created_date [number]   id [string]
+        |
+        |""".stripMargin
   }
 
 }

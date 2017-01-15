@@ -28,12 +28,18 @@ object Table {
     }
 
     rows.foreach { row =>
-      val output = row.zipWithIndex.map {
+      val output = row.zipWithIndex.flatMap {
         case (col, i) =>
           val max = maxes(i)
           val size = col.length
           val rendered = col.render
-          if (size < max && i < row.size - 1) rendered + (" " * (max - size)) else rendered
+          // avoid printing trailing spaces when the final column is empty
+          val isLast = i == row.size - 1
+          if (isLast && rendered.isEmpty) {
+            None
+          } else {
+            Some(if (size < max && i < row.size - 1) rendered + (" " * (max - size)) else rendered)
+          }
       }.mkString(" " * 3)
       out.println(output)
     }
