@@ -232,7 +232,8 @@ object Eval {
       val table = dynamo.getTable(query.table)
       val Ast.PrimaryKey(hash, range) = query.key
       val baseSpec = new UpdateItemSpec()
-
+      val expected = (Seq(hash) ++ range.toSeq)
+        .map(key => new Expected(key.field).exists())
       val spec = range.fold(
         baseSpec.withPrimaryKey(hash.field, unwrap(hash.value))
       ) { range =>
@@ -242,10 +243,11 @@ object Eval {
             hash.field,
             unwrap(hash.value)
           )
-        }.withAttributeUpdate(query.fields.map {
+        }
+        .withAttributeUpdate(query.fields.map {
           case (key, value) => new AttributeUpdate(key).put(unwrap(value))
         }: _*)
-      // TODO: id must exist condition
+        .withExpected(expected.asJava)
       table.updateItem(spec)
       Complete
     })

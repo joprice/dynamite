@@ -8,6 +8,26 @@ import play.api.libs.json.Json
 
 object Seed {
 
+  def createTableWithoutHashKey(tableName: String, client: AmazonDynamoDB): Unit = {
+    TableUtils.createTableIfNotExists(
+      client,
+      new CreateTableRequest()
+        .withTableName(tableName)
+        .withProvisionedThroughput(
+          new ProvisionedThroughput()
+            .withReadCapacityUnits(5L)
+            .withWriteCapacityUnits(5L)
+        )
+        .withAttributeDefinitions(
+          new AttributeDefinition("userId", ScalarAttributeType.S)
+        )
+        .withKeySchema(
+          new KeySchemaElement("userId", KeyType.HASH)
+        )
+    )
+    TableUtils.waitUntilActive(client, tableName)
+  }
+
   def createTable(tableName: String, client: AmazonDynamoDB): Unit = {
     TableUtils.createTableIfNotExists(
       client,
@@ -97,10 +117,5 @@ object Seed {
     items.foreach(table.putItem(_))
   }
 
-  def apply(tableName: String, client: AmazonDynamoDB): Unit = {
-    //TableUtils.deleteTableIfExists(client, new DeleteTableRequest().withTableName("users"))
-    Seed.createTable(tableName, client)
-    Seed.insertSeedData(tableName, client)
-  }
 }
 
