@@ -19,20 +19,17 @@ trait DynamoSpec
     with BeforeAndAfterEach
     with DynamoTestClient { self: Suite =>
 
-  def tableName: String
+  def tableNames: Seq[String]
 
   lazy val dynamo = new DynamoDB(client)
-  lazy val table = dynamo.getTable(tableName)
-
-  override def beforeEach() = {
-    super.beforeEach()
-    Seed(tableName, client)
-  }
 
   override def afterEach() = {
     super.afterEach()
-    table.delete()
-    table.waitForDelete()
+    tableNames.foreach { tableName =>
+      val table = dynamo.getTable(tableName)
+      table.delete()
+      table.waitForDelete()
+    }
   }
 
   override def afterAll() = {

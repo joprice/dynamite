@@ -1,8 +1,10 @@
 package dynamite
 
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
+import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
 import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
+import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
 
@@ -14,6 +16,19 @@ class EvalSpec
     with EitherValues {
 
   val tableName = "eval-spec"
+  val rangeKeyTableName = "eval-spec-range-key"
+
+  val tableNames = Seq(
+    tableName,
+    rangeKeyTableName
+  )
+
+  override def beforeEach() = {
+    super.beforeEach()
+    Seed.createTable(tableName, client)
+    Seed.createTableWithoutHashKey(rangeKeyTableName, client)
+    Seed.insertSeedData(tableName, client)
+  }
 
   def run(query: String): Either[Throwable, Response] =
     Parser(query).flatMap {
@@ -25,9 +40,15 @@ class EvalSpec
 
   def validate[A](query: String, expected: A) = {
     run(query).map {
-      case Response.ResultSet(result, _) =>
-        val json = result.toList
-          .map(_.result.success.value.map(item => Json.parse(item.toString)))
+      case Response.ResultSet(pages, _) =>
+        val json = pages.toList
+          .map { page =>
+            val result = page.result
+            result.failed.foreach { error =>
+              println(s"query '$query' failed: $error")
+            }
+            result.success.value.map(item => Json.parse(item.toString))
+          }
         json should be(expected)
       case _ => ???
     }.left.map { error =>
@@ -93,9 +114,25 @@ class EvalSpec
     val newName = "Chill Timez"
     run(
       s"update $tableName set name = '$newName' where userId = 'user-id-1' and id = 1"
-    )
+    ).right.value
     validate(
       s"select name from $tableName where userId = 'user-id-1' and id = 1", List(List(
+        Json.obj("name" -> newName)
+      ))
+    )
+  }
+
+  it should "support updating without range key" in {
+    val newName = "new title"
+    val userId = "user-id-1"
+    run(
+      s"""insert into $rangeKeyTableName (userId, name) values ('$userId', "original-title")"""
+    ).right.value
+    run(
+      s"update $rangeKeyTableName set name = '$newName' where userId = '$userId'"
+    ).right.value
+    validate(
+      s"select name from $rangeKeyTableName where userId = '$userId'", List(List(
         Json.obj("name" -> newName)
       ))
     )
@@ -104,7 +141,7 @@ class EvalSpec
   it should "support deleting a record" in {
     run(
       s"delete from $tableName where userId = 'user-id-1' and id = 1"
-    )
+    ).right.value
     validate(
       s"select name from $tableName where userId = 'user-id-1' and id = 1", List(List())
     )
@@ -114,7 +151,7 @@ class EvalSpec
     val newName = "Throwback Thursday"
     run(
       s"""insert into $tableName (userId, id, name, tracks) values ('user-id-1', 20, "$newName", [1,2,3])"""
-    )
+    ).right.value
     validate(
       s"select name from $tableName where userId = 'user-id-1' and id = 20", List(List(
         Json.obj("name" -> newName)
@@ -126,7 +163,7 @@ class EvalSpec
     val newName = "Throwback Thursday"
     run(
       s"""insert into $tableName (userId, id, name, duration) values ('user-id-1', 20, "$newName", 1.1)"""
-    )
+    ).right.value
     validate(
       s"select duration from $tableName where userId = 'user-id-1' and id = 20", List(List(
         Json.obj("duration" -> 1.1)
@@ -147,7 +184,8 @@ class EvalSpec
   }
 
   it should "return ambiguous index error" in {
-    run(s"select id from $tableName where userId = 'user-id-1' and duration = 10").left.value shouldBe an[AmbiguousIndexException]
+    run(s"select id from $tableName where userId = 'user-id-1' and duration = 10")
+      .left.value shouldBe an[AmbiguousIndexException]
   }
 
   it should "use an explicit index when provided" in {
@@ -187,6 +225,36 @@ class EvalSpec
     ).right.value should matchPattern {
         case Response.ResultSet(_, Some(_)) =>
       }
+  }
+
+  it should "return table description" in {
+    val result = run(
+      s"describe table $tableName"
+    )
+    result.right.value should matchPattern {
+      case TableDescription(
+        "eval-spec",
+        KeySchema("userId", ScalarAttributeType.S),
+        Some(KeySchema("id", ScalarAttributeType.N)),
+        List(
+          Index(
+            "playlist-length",
+            KeySchema("userId", ScalarAttributeType.S),
+            Some(KeySchema("duration", ScalarAttributeType.N))
+            ),
+          Index(
+            "playlist-length-keys-only",
+            KeySchema("userId", ScalarAttributeType.S),
+            Some(KeySchema("duration", ScalarAttributeType.N))
+            ),
+          Index(
+            "playlist-name",
+            KeySchema("userId", ScalarAttributeType.S),
+            Some(KeySchema("name", ScalarAttributeType.S))
+            )
+          )
+        ) =>
+    }
   }
 
 }
