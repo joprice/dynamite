@@ -6,7 +6,7 @@ import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
-import dynamite.Ast.DescribeTable
+import dynamite.Ast.{ DescribeTable, ShowTables }
 import dynamite.Ast.Projection.FieldSelector.{ All, Field }
 import dynamite.Response.{ Index, KeySchema }
 import fansi.{ Bold, Color, Str }
@@ -108,6 +108,40 @@ class ReplSpec
          |"def"   2
          |
          |Completed in 1000 ms
+         |""".stripMargin
+    )
+  }
+
+  it should "handle failing pagination" in {
+    val writer = new StringWriter()
+    val query = s"select * from playlists where userId = 'user-id-1';"
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular,
+        _ => Try(
+          Response.ResultSet(
+            Iterator(
+              Timed(Success(List {
+                val node = ObjectMapperSingleton.getObjectMapper.createObjectNode()
+                node.put("id", "abc")
+                node.put("size", 2)
+              }), 1.second),
+              Timed(Failure(new Exception("second page failed")))
+            )
+          )
+        )
+      )
+    }
+    Ansi.stripAnsi(writer.toString) should be(
+      s"""id      size
+         |"abc"   2
+         |
+         |Completed in 1000 ms
+         |Press q to quit, any key to load next page.
+         |[error] second page failed
          |""".stripMargin
     )
   }
@@ -243,7 +277,7 @@ class ReplSpec
     Ansi.stripAnsi(error) shouldBe result
   }
 
-  "printTableDescription" should "print a list of table schemas" in {
+  "printTableDescription" should "render a single table schema" in {
     val query = "describe table playlists;"
     val writer = new StringWriter()
     withReader(query) { reader =>
@@ -252,7 +286,7 @@ class ReplSpec
         new PrintWriter(writer),
         reader,
         Ast.Format.Tabular, {
-          case DescribeTable(table) =>
+          case DescribeTable("playlists") =>
             Success(Response.TableDescription(
               "playlists",
               KeySchema("id", ScalarAttributeType.S),
@@ -261,9 +295,7 @@ class ReplSpec
                 Index(
                   "by_image",
                   KeySchema("image", ScalarAttributeType.B),
-                  Some(
-                    KeySchema("id", ScalarAttributeType.S)
-                  )
+                  None
                 ),
                 Index(
                   "by_created_date",
@@ -287,10 +319,66 @@ class ReplSpec
         |
         |indexes
         |name              hash                    range
-        |by_image          image [binary]          id [string]
+        |by_image          image [binary]${"       "}
         |by_created_date   created_date [number]   id [string]
         |
         |""".stripMargin
+  }
+
+  it should "render a schema with range key" in {
+    val query = "describe table playlists;"
+    val writer = new StringWriter()
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular, {
+          case DescribeTable("playlists") =>
+            Success(Response.TableDescription(
+              "playlists",
+              KeySchema("userId", ScalarAttributeType.S),
+              Some(KeySchema("id", ScalarAttributeType.S)),
+              Seq.empty
+            ))
+          case _ => ???
+        }
+      )
+    }
+    Ansi.stripAnsi(writer.toString) shouldBe
+      s"""schema
+         |name        hash              range
+         |playlists   userId [string]   id [string]
+         |
+         |indexes
+         |name   hash   range
+         |
+         |""".stripMargin
+  }
+
+  "show tables" should "render a list of tables" in {
+    val query = "show tables;"
+    val writer = new StringWriter()
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular, {
+          case ShowTables =>
+            Success(Response.TableNames(
+              Iterator.single(Timed(Success(List("playlists")), 1.second))
+            ))
+          case _ => ???
+        }
+      )
+    }
+    Ansi.stripAnsi(writer.toString) shouldBe
+      s"""name
+         |playlists
+         |
+         |Completed in 1000 ms
+         |""".stripMargin
   }
 
 }
