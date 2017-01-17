@@ -12,7 +12,8 @@ import net.ceedubs.ficus.readers.ValueReader
 
 final case class DynamiteConfig(
   pageSize: Int = 20,
-  historyFile: File = DynamiteConfig.defaultHistoryFile
+  historyFile: File = DynamiteConfig.defaultHistoryFile,
+  endpoint: Option[String] = None
 )
 
 object DynamiteConfig {
@@ -61,4 +62,3 @@ object DynamiteConfig {
     }
   }
 }
-

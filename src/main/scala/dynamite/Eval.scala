@@ -29,6 +29,34 @@ object Eval {
     }
   }
 
+  def assumeIndex(tableCache: TableCache, tableName: String, hashKey: String, rangeKey: Option[String]) = {
+    val grouped = tableCache.get(tableName).fold(
+      error => throw error,
+      table => table.getOrElse(throw UnknownTableException(tableName))
+    ).indexes.groupBy { index =>
+        (index.hash.name, index.range.map(_.name))
+      }.mapValues(_.map(_.name))
+    grouped.get(hashKey -> rangeKey).map {
+      case Seq(indexName) => indexName
+      case indexes => throw AmbiguousIndexException(indexes)
+    }
+  }
+
+  def validateIndex(
+    tableDescription: TableDescription,
+    indexName: String,
+    hashKey: String,
+    rangeKey: Option[String]
+  ): String = {
+    tableDescription.indexes.find(_.name == indexName).map { index =>
+      if (index.hash.name != hashKey && rangeKey.forall(value => index.range.exists(_.name == value))) {
+        throw InvalidHashKeyException(index, hashKey)
+      } else indexName
+    }.getOrElse {
+      throw UnknownIndexException(indexName)
+    }
+  }
+
   def jsonNode(item: Item) = Jackson.jsonNodeOf(item.toJSON)
 
   //TODO: handle pagination - use withMaxPageSize instead?
@@ -265,6 +293,17 @@ object Eval {
   }
 
   def select(dynamo: DynamoDB, query: Select, pageSize: Int, tableCache: TableCache): Try[ResultSet] = Try {
+    //TODO: return instead of throwing
+    lazy val tableDescription = tableCache.get(query.from).fold(
+      {
+        case _: ResourceNotFoundException => throw UnknownTableException(query.from)
+        case error => throw error
+      },
+      table => table.getOrElse(throw UnknownTableException(query.from))
+    )
+
+    val table = dynamo.getTable(query.from)
+
     def wrap[A](results: ItemCollection[A]) = {
       import scala.collection.breakOut
       val it = results.pages.iterator()
@@ -276,9 +315,6 @@ object Eval {
         Some(() => results.getAccumulatedConsumedCapacity)
       )
     }
-
-    //TODO: what to do when field does not exist on object?
-    val table = dynamo.getTable(query.from)
 
     def querySpec() = {
       val spec = new QuerySpec()
@@ -299,20 +335,6 @@ object Eval {
     def querySingle(hash: Key, range: Key) = {
       val Key(hashKey, hashValue) = hash
       val Key(rangeKey, rangeValue) = range
-
-      def assumeIndex = {
-        //TODO: return instead of throwing
-        val grouped = tableCache.get(query.from).fold(
-          error => throw error,
-          table => table.getOrElse(throw UnknownTableException(query.from))
-        ).indexes.groupBy { index =>
-            (index.hash.name, index.range.map(_.name))
-          }.mapValues(_.map(_.name))
-        grouped.get(hashKey -> Some(rangeKey)).map {
-          case Seq(indexName) => indexName
-          case indexes => throw AmbiguousIndexException(indexes)
-        }
-      }
 
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
       def queryIndex(indexName: String) = {
@@ -350,61 +372,45 @@ object Eval {
 
       //TODO: check types as well?
       query.useIndex
-        .orElse(assumeIndex)
+        .map(validateIndex(tableDescription, _, hash.field, Some(range.field)))
+        .orElse(assumeIndex(
+          tableCache,
+          tableName = query.from,
+          hashKey = hashKey,
+          rangeKey = Some(rangeKey)
+        ))
         .map(queryIndex)
         .getOrElse(getItem())
     }
 
     def range(field: String, value: KeyValue) = {
-      lazy val tableDescription = tableCache.get(query.from).fold(
-        {
-          case _: ResourceNotFoundException => throw UnknownTableException(query.from)
-          case error => throw error
-        },
-        table => table.getOrElse(throw UnknownTableException(query.from))
-      )
+      val (aggregates, spec) = querySpec()
 
-      def validateIndex(indexName: String): String = {
-        tableDescription.indexes.find(_.name == indexName).map { index =>
-          if (index.hash.name != field) {
-            throw InvalidHashKeyException(index, field)
-          } else indexName
-        }.getOrElse {
-          throw UnknownIndexException(indexName)
-        }
-      }
-
-      def assumeIndex: Option[String] = {
-        // If the main table has the correct hash key, use that. Otherwise, check indexes. This is to avoid the
-        // addition of a single local secondary index forcing all queries to add a 'use index' clause.
-        if (tableDescription.hash.name == field) {
-          None
-        } else {
-          val grouped = tableDescription.indexes.groupBy { index =>
-            index.hash.name
-          }.mapValues(_.map(_.name))
-          grouped.get(field).map {
-            case Seq(indexName) => indexName
-            case indexes => throw AmbiguousIndexException(indexes)
+      val results = query.useIndex
+        .map(validateIndex(tableDescription, _, field, None))
+        .orElse {
+          // If the main table has the correct hash key, use that. Otherwise, check indexes. This is to avoid the
+          // addition of a single local secondary index forcing all queries to add a 'use index' clause.
+          if (tableDescription.hash.name == field) {
+            None
+          } else {
+            assumeIndex(
+              tableCache,
+              tableName = query.from,
+              hashKey = field,
+              rangeKey = None
+            )
           }
         }
-      }
-
-      query.useIndex
-        .map(validateIndex)
-        .orElse(assumeIndex)
         .map { indexName =>
-          val (aggregates, spec) = querySpec()
-          val results = table.getIndex(indexName).query(
+          table.getIndex(indexName).query(
             spec.withHashKey(field, unwrap(value))
           )
-          (aggregates, wrap(results))
         }
         .getOrElse {
-          val (aggregates, spec) = querySpec()
-          val results = table.query(spec.withHashKey(field, unwrap(value)))
-          (aggregates, wrap(results))
+          table.query(spec.withHashKey(field, unwrap(value)))
         }
+      (aggregates, wrap(results))
     }
 
     def scan() = {

@@ -265,9 +265,6 @@ object Repl {
   }
 
   def apply(opts: Opts): Unit = {
-    val client = new Lazy({
-      dynamoClient(opts.endpoint)
-    })
     val config = opts.configFile
       .map(DynamiteConfig.parseConfig)
       .getOrElse {
@@ -277,6 +274,10 @@ object Repl {
           System.err.println(s"Failed to load config: ${error.getMessage}")
           sys.exit(1)
       }.get
+    val endpoint = opts.endpoint.orElse(config.endpoint)
+    val client = new Lazy({
+      dynamoClient(endpoint)
+    })
     apply(client, config)
   }
 
@@ -440,4 +441,3 @@ object Repl {
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
 
 }
-

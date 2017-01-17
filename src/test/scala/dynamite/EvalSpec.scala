@@ -3,7 +3,7 @@ package dynamite
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownTableException }
+import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownIndexException, UnknownTableException }
 import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -193,10 +193,25 @@ class EvalSpec
   }
 
   it should "use an explicit index when provided" in {
-    validate(s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only", List(List(
-      Json.obj("id" -> 2),
-      Json.obj("id" -> 1)
-    )))
+    validate(
+      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only",
+      List(List(
+        Json.obj("id" -> 2),
+        Json.obj("id" -> 1)
+      ))
+    )
+  }
+
+  it should "fail when index does not exist with hash provided" in {
+    run(
+      s"select id from $tableName where userId = 'user-id-1' use index fake-index"
+    ).left.value shouldBe UnknownIndexException("fake-index")
+  }
+
+  it should "fail when index does not exist with hash and range provided" in {
+    run(
+      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index fake-index"
+    ).left.value shouldBe UnknownIndexException("fake-index")
   }
 
   it should "fail when hash key does not match index hash key" in {
@@ -244,7 +259,7 @@ class EvalSpec
     )
   }
 
-  it should "return consumed cacpacity" in {
+  it should "return consumed capacity" in {
     run(
       s"select count(*) from $tableName where userId = 'user-id-1'"
     ).right.value should matchPattern {
