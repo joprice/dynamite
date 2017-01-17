@@ -3,7 +3,7 @@ package dynamite
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
+import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownTableException }
 import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -23,8 +23,11 @@ class EvalSpec
     rangeKeyTableName
   )
 
+  lazy val tableCache = new TableCache(Eval.describeTable(dynamo, _))
+
   override def beforeEach() = {
     super.beforeEach()
+    tableCache.clear()
     Seed.createTable(tableName, client)
     Seed.createTableWithoutHashKey(rangeKeyTableName, client)
     Seed.insertSeedData(tableName, client)
@@ -32,7 +35,7 @@ class EvalSpec
 
   def run(query: String): Either[Throwable, Response] =
     Parser(query).flatMap {
-      case result: Query => Eval(new DynamoDB(client), result, 20).toEither
+      case result: Query => Eval(dynamo, result, 20, tableCache).toEither
       case _: ReplCommand => ???
     }
 
@@ -171,6 +174,7 @@ class EvalSpec
     )
   }
 
+  // TODO: this could use playlist-name or playlist-name-global
   it should "use an index when unambiguous" in {
     validate(s"select id from $tableName where userId = 'user-id-1' and name = 'EDM4LYFE'", List(List(
       Json.obj("id" -> 2)
@@ -193,6 +197,27 @@ class EvalSpec
       Json.obj("id" -> 2),
       Json.obj("id" -> 1)
     )))
+  }
+
+  it should "fail when hash key does not match index hash key" in {
+    run(
+      s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
+    ).left.value shouldBe InvalidHashKeyException(
+        Index(
+          "playlist-name",
+          KeySchema("userId", ScalarAttributeType.S), Some(KeySchema("name", ScalarAttributeType.S))
+        ),
+        "name"
+      )
+  }
+
+  it should "query against an explicit index" in {
+    validate(
+      s"select id from $tableName where name = 'Disco Fever' use index playlist-name-global",
+      List(List(
+        Json.obj("id" -> 3)
+      ))
+    )
   }
 
   "aggregate" should "support count" in {
@@ -236,7 +261,12 @@ class EvalSpec
         "eval-spec",
         KeySchema("userId", ScalarAttributeType.S),
         Some(KeySchema("id", ScalarAttributeType.N)),
-        List(
+        Seq(
+          Index(
+            "playlist-name-global",
+            KeySchema("name", ScalarAttributeType.S),
+            Some(KeySchema("id", ScalarAttributeType.N))
+            ),
           Index(
             "playlist-length",
             KeySchema("userId", ScalarAttributeType.S),
@@ -256,5 +286,4 @@ class EvalSpec
         ) =>
     }
   }
-
 }

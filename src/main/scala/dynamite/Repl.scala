@@ -16,9 +16,8 @@ import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
-import dynamite.Completer.TableCache
 import dynamite.Parser.ParseException
-import dynamite.Response.KeySchema
+import dynamite.Response.{ KeySchema, TableDescription }
 import fansi._
 
 import scala.collection.breakOut
@@ -290,9 +289,9 @@ object Repl {
         // instead felt by the user when making the first query
         val wrapped = client.map(new DynamoDB(_))
 
-        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize)
+        val tableCache = new TableCache(Eval.describeTable(wrapped(), _))
 
-        val tableCache = new TableCache(table => Eval.describeTable(wrapped(), table))
+        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize, tableCache)
 
         val jLineReader = new JLineReader(reader)
         jLineReader.resetPrompt()

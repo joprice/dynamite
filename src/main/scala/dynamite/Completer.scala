@@ -1,15 +1,13 @@
 package dynamite
 
 import java.nio.file.{ Files, Paths, StandardOpenOption }
-
-import dynamite.Response.{ TableDescription, TableNames }
+import dynamite.Response.TableNames
 import jline.console.ConsoleReader
 import jline.console.completer._
 import Parser._
 import fastparse.all._
 import scala.util.Try
 import scala.collection.JavaConverters._
-import scala.collection.concurrent.TrieMap
 import fastparse.core.Parsed.Success
 
 object Completer {
@@ -53,19 +51,6 @@ object Completer {
     case (_, table) => table
   }
 
-  class TableCache(describeTables: String => Try[TableDescription]) {
-    private[this] val tableNameCache = TrieMap[String, TableDescription]()
-
-    def get(tableName: String): Option[TableDescription] = {
-      tableNameCache.get(tableName).orElse {
-        describeTables(tableName).toOption.map { result =>
-          tableNameCache.put(tableName, result)
-          result
-        }
-      }
-    }
-  }
-
   class FieldsCompleter(
       reader: ConsoleReader,
       tableCache: TableCache
@@ -76,7 +61,7 @@ object Completer {
         case _ => None
       }
     }.fold(Seq.empty[String]) { name =>
-      tableCache.get(name).map { desc =>
+      tableCache.get(name).toOption.flatten.map { desc =>
         (desc.hash +: desc.range.toSeq).map(_.name)
       }.getOrElse(Seq.empty)
     }

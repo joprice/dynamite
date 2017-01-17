@@ -16,14 +16,16 @@ import scala.util.{ Failure, Success, Try }
 
 object Eval {
 
-  def apply(dynamo: DynamoDB, query: Query, pageSize: Int): Try[Response] = {
+  def apply(dynamo: DynamoDB, query: Query, pageSize: Int, tableCache: TableCache): Try[Response] = {
     query match {
-      case query: Select => select(dynamo, query, pageSize)
+      case query: Select => select(dynamo, query, pageSize, tableCache)
       case query: Update => update(dynamo, query)
       case query: Delete => delete(dynamo, query)
       case query: Insert => insert(dynamo, query)
       case ShowTables => showTables(dynamo)
-      case DescribeTable(table) => describeTable(dynamo, table)
+      case DescribeTable(table) =>
+        tableCache.get(table)
+          .map(_.getOrElse(Response.Info(s"No table exists with name $table")))
     }
   }
 
@@ -98,6 +100,7 @@ object Eval {
     }
   }
 
+  //TODO: use UnknownTableException
   def recoverQuery[A](table: String, result: Try[A]) = {
     result.recoverWith {
       case _: ResourceNotFoundException =>
@@ -112,6 +115,14 @@ object Eval {
 
   final case class UnknownTableException(table: String) extends Exception(
     s"Unknown table: $table"
+  )
+
+  final case class UnknownIndexException(index: String) extends Exception(
+    s"Unknown index: $index"
+  )
+
+  final case class InvalidHashKeyException(index: Index, hashKey: String) extends Exception(
+    s"Hash key of '${index.hash.name}' of index '${index.name}' does not match provided hash key '$hashKey'."
   )
 
   object LazySingleIterator {
@@ -253,7 +264,7 @@ object Eval {
     })
   }
 
-  def select(dynamo: DynamoDB, query: Select, pageSize: Int): Try[ResultSet] = Try {
+  def select(dynamo: DynamoDB, query: Select, pageSize: Int, tableCache: TableCache): Try[ResultSet] = Try {
     def wrap[A](results: ItemCollection[A]) = {
       import scala.collection.breakOut
       val it = results.pages.iterator()
@@ -290,12 +301,13 @@ object Eval {
       val Key(rangeKey, rangeValue) = range
 
       def assumeIndex = {
-        //TODO: cache this
-        val grouped = describeTable(dynamo, query.from).getOrElse {
-          throw UnknownTableException(query.from)
-        }.indexes.groupBy { index =>
-          (index.hash.name, index.range.map(_.name))
-        }.mapValues(_.map(_.name))
+        //TODO: return instead of throwing
+        val grouped = tableCache.get(query.from).fold(
+          error => throw error,
+          table => table.getOrElse(throw UnknownTableException(query.from))
+        ).indexes.groupBy { index =>
+            (index.hash.name, index.range.map(_.name))
+          }.mapValues(_.map(_.name))
         grouped.get(hashKey -> Some(rangeKey)).map {
           case Seq(indexName) => indexName
           case indexes => throw AmbiguousIndexException(indexes)
@@ -337,15 +349,62 @@ object Eval {
       }
 
       //TODO: check types as well?
-      query.useIndex.orElse(assumeIndex)
+      query.useIndex
+        .orElse(assumeIndex)
         .map(queryIndex)
         .getOrElse(getItem())
     }
 
     def range(field: String, value: KeyValue) = {
-      val (aggregates, spec) = querySpec()
-      val results = table.query(spec.withHashKey(field, unwrap(value)))
-      (aggregates, wrap(results))
+      lazy val tableDescription = tableCache.get(query.from).fold(
+        {
+          case _: ResourceNotFoundException => throw UnknownTableException(query.from)
+          case error => throw error
+        },
+        table => table.getOrElse(throw UnknownTableException(query.from))
+      )
+
+      def validateIndex(indexName: String): String = {
+        tableDescription.indexes.find(_.name == indexName).map { index =>
+          if (index.hash.name != field) {
+            throw InvalidHashKeyException(index, field)
+          } else indexName
+        }.getOrElse {
+          throw UnknownIndexException(indexName)
+        }
+      }
+
+      def assumeIndex: Option[String] = {
+        // If the main table has the correct hash key, use that. Otherwise, check indexes. This is to avoid the
+        // addition of a single local secondary index forcing all queries to add a 'use index' clause.
+        if (tableDescription.hash.name == field) {
+          None
+        } else {
+          val grouped = tableDescription.indexes.groupBy { index =>
+            index.hash.name
+          }.mapValues(_.map(_.name))
+          grouped.get(field).map {
+            case Seq(indexName) => indexName
+            case indexes => throw AmbiguousIndexException(indexes)
+          }
+        }
+      }
+
+      query.useIndex
+        .map(validateIndex)
+        .orElse(assumeIndex)
+        .map { indexName =>
+          val (aggregates, spec) = querySpec()
+          val results = table.getIndex(indexName).query(
+            spec.withHashKey(field, unwrap(value))
+          )
+          (aggregates, wrap(results))
+        }
+        .getOrElse {
+          val (aggregates, spec) = querySpec()
+          val results = table.query(spec.withHashKey(field, unwrap(value)))
+          (aggregates, wrap(results))
+        }
     }
 
     def scan() = {
@@ -374,4 +433,3 @@ object Eval {
     applyAggregates(aggregates, results)
   }
 }
-

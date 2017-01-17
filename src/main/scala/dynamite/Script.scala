@@ -5,6 +5,7 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast._
+import dynamite.Response.TableDescription
 import jline.internal.Ansi
 
 import scala.util.{ Failure, Success, Try }
@@ -65,7 +66,9 @@ object Script {
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, {
       case query: Query =>
-        Eval(new DynamoDB(client), query, 20) match {
+        val dynamo = new DynamoDB(client)
+        val tables = new TableCache(Eval.describeTable(dynamo, _))
+        Eval(dynamo, query, 20, tables) match {
           case Success(results) =>
             (query, results) match {
               case (select: Ast.Select, Response.ResultSet(pages, _)) =>
