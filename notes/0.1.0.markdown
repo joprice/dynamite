@@ -1,0 +1,8 @@
+* improve index validation
+* cache table descriptions
+* check if key exists on update to avoid upsert
+* add optional config file and move history to `~/.dynamite` folder
+* in multi-line queries with a syntax error, only show the line where the error occurred
+* add experimental `sum` aggregate function
+* set exit status on failures in script mode
+
