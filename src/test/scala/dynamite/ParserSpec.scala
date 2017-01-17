@@ -232,12 +232,12 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   it should "allow selecting ascending order" in {
     validate(
-      "select id, name from playlist asc limit 10",
+      "select id, name from playlist order by id asc limit 10",
       Select(
         Seq("id", "name").map(Field),
         "playlist",
         None,
-        Some(Ascending),
+        Some(OrderBy("id", Some(Ascending))),
         Some(10)
       )
     )
@@ -245,12 +245,12 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   it should "allow selecting descending order" in {
     validate(
-      "select id, name from playlist desc limit 10",
+      "select id, name from playlist order by name desc limit 10",
       Select(
         Seq("id", "name").map(Field),
         "playlist",
         None,
-        Some(Descending),
+        Some(OrderBy("name", Some(Descending))),
         Some(10)
       )
     )
@@ -352,8 +352,8 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
   }
 
   it should "ignore case" in {
-    parse("SELECT * FROM playlists ASC LIMIT 1 USE INDEX playlist-length-keys-only")
-    parse("SELECT COUNT(*) FROM playlists DESC LIMIT 1 USE INDEX playlist-length-keys-only")
+    parse("SELECT * FROM playlists ORDER BY ID ASC LIMIT 1 USE INDEX playlist-length-keys-only")
+    parse("SELECT COUNT(*) FROM playlists ORDER BY ID DESC LIMIT 1 USE INDEX playlist-length-keys-only")
     parse("INSERT INTO playlists (id, tracks) VALUES (1, [1,2,3])")
     parse("UPDATE playlists SET name = 'Chillax' WHERE userId = 'user-id-1' AND id = 1")
     parse("SHOW TABLES")

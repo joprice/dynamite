@@ -20,21 +20,27 @@ object Response {
 
   final case class PrimaryKey(name: String)
 
+  sealed trait TableSchema {
+    def name: String
+    def hash: KeySchema
+    def range: Option[KeySchema]
+  }
+
   final case class TableDescription(
     name: String,
     hash: KeySchema,
     range: Option[KeySchema],
     indexes: Seq[Index]
-  ) extends Response
-
-  case object Complete extends Response
-
-  final case class KeySchema(name: String, `type`: ScalarAttributeType)
+  ) extends Response with TableSchema
 
   final case class Index(
     name: String,
     hash: KeySchema,
     range: Option[KeySchema]
-  )
+  ) extends TableSchema
+
+  case object Complete extends Response
+
+  final case class KeySchema(name: String, `type`: ScalarAttributeType)
 
 }

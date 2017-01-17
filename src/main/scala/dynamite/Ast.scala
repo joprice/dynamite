@@ -28,7 +28,7 @@ object Ast {
     projection: Seq[Projection],
     from: String,
     where: Option[PrimaryKey] = None,
-    direction: Option[Direction] = None,
+    orderBy: Option[OrderBy] = None,
     limit: Option[Int] = None,
     useIndex: Option[String] = None
   ) extends Query
@@ -52,6 +52,8 @@ object Ast {
   case object ShowTables extends Query
 
   final case class DescribeTable(table: String) extends Query
+
+  final case class OrderBy(field: String, direction: Option[Direction])
 
   sealed abstract class Direction extends Product with Serializable
   case object Ascending extends Direction

@@ -74,7 +74,7 @@ class EvalSpec
 
   it should "allow explicit ascending order" in {
     validate(
-      s"select * from $tableName where userId = 'user-id-1' asc", List(
+      s"select * from $tableName where userId = 'user-id-1' order by id asc", List(
         Seed.seedData
           .filter(json => (json \ "userId").as[String] == "user-id-1")
       )
@@ -83,7 +83,7 @@ class EvalSpec
 
   it should "allow reversing the results " in {
     validate(
-      s"select * from $tableName where userId = 'user-id-1' desc", List(
+      s"select * from $tableName where userId = 'user-id-1' order by id desc", List(
         Seed.seedData
         .filter(json => (json \ "userId").as[String] == "user-id-1")
         .reverse

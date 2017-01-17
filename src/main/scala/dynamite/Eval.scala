@@ -38,8 +38,9 @@ object Eval {
     tableCache: TableCache,
     tableName: String,
     hashKey: String,
-    rangeKey: Option[String]
-  ): Option[String] = {
+    rangeKey: Option[String],
+    orderBy: Option[OrderBy]
+  ): Option[Index] = {
     val table = tableCache.get(tableName)
       .fold(
         error => throw error,
@@ -50,21 +51,34 @@ object Eval {
       val results = rangeKey.fold(candidates) { range =>
         candidates.filter(_.range.exists(_.name == range))
       }
-      results match {
+      val filtered = orderBy.fold(results) { order =>
+        results.filter { result =>
+          result.range.fold(order.field == result.hash.name)(_.name == order.field)
+        }
+      }
+      filtered match {
         case Seq() => None
-        case Seq(index) => Some(index.name)
+        case Seq(index) => Some(index)
         case indexes => throw AmbiguousIndexException(indexes.map(_.name))
       }
     }
   }
 
-  //TODO: switch to either/try
+  def validateOrderBy(hash: KeySchema, range: Option[KeySchema], orderBy: Option[OrderBy]) = {
+    orderBy.foreach { order =>
+      val validOrder = range.fold(order.field == hash.name)(_.name == order.field)
+      if (!validOrder) {
+        throw new Exception(s"'${order.field}' is not a valid sort field.")
+      }
+    }
+  }
+
   def validateIndex(
     tableDescription: TableDescription,
     indexName: String,
     hashKey: String,
     rangeKey: Option[String]
-  ): String = {
+  ): Index = {
     tableDescription.indexes.find(_.name == indexName).map { index =>
       if (index.hash.name != hashKey) {
         throw InvalidHashKeyException(index, hashKey)
@@ -76,7 +90,7 @@ object Eval {
             throw UnexpectedRangeKeyException(left)
           case (None, Some(right)) =>
             throw MissingRangeKeyException(right.name)
-          case _ => indexName
+          case _ => index
         }
       }
     }.getOrElse {
@@ -376,27 +390,47 @@ object Eval {
         limit => withFields.withMaxResultSize(limit)
       }
         .withMaxPageSize(pageSize)
-        .withScanIndexForward(scanForward(query.direction)))
+        .withScanIndexForward(scanForward(query.orderBy.flatMap(_.direction))))
     }
 
     def querySingle(hash: Key, range: Key) = {
       val Key(hashKey, hashValue) = hash
       val Key(rangeKey, rangeValue) = range
 
+      def validateKeys(schema: TableSchema): Unit = {
+        if (hashKey != schema.hash.name) {
+          throw new Exception(s"Invalid hash key '$hashKey'")
+        }
+        schema.range match {
+          case Some(range) =>
+            if (rangeKey != range.name) {
+              throw new Exception(s"Invalid range key '$rangeKey'")
+            }
+          case None =>
+            throw new Exception(s"Schema '${schema.name}' does not contain a range key")
+        }
+      }
+
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
-      def queryIndex(indexName: String) = {
+      def queryIndex(index: Index) = {
+        validateKeys(index)
+
         val (aggregates, spec) = querySpec()
-        val results = wrap(table.getIndex(indexName).query(
+        val results = wrap(table.getIndex(index.name).query(
           spec
             .withHashKey(hashKey, unwrap(hashValue))
             .withRangeKeyCondition(
               new RangeKeyCondition(rangeKey).eq(unwrap(rangeValue))
             )
+        //TODO: support order by on index queries?
+        //.withScanIndexForward()
         ))
         (aggregates, results)
       }
 
       def getItem() = {
+        validateKeys(tableDescription)
+
         val spec = new GetItemSpec()
 
         val withKey = spec.withPrimaryKey(
@@ -424,9 +458,14 @@ object Eval {
           tableCache,
           tableName = query.from,
           hashKey = hashKey,
-          rangeKey = Some(rangeKey)
+          rangeKey = Some(rangeKey),
+          orderBy = query.orderBy
         ))
-        .map(queryIndex)
+        .map { index =>
+          validateOrderBy(index.hash, index.range, query.orderBy)
+          index
+        }
+        .map(index => queryIndex(index))
         .getOrElse(getItem())
     }
 
@@ -436,25 +475,30 @@ object Eval {
       val results = query.useIndex
         .map(validateIndex(tableDescription, _, field, None))
         .orElse {
+          def sortByTableField = query.orderBy.forall { order =>
+            order.field == tableDescription.hash.name || tableDescription.range.exists(_.name == field)
+          }
           // If the main table has the correct hash key, use that. Otherwise, check indexes. This is to avoid the
           // addition of a single local secondary index forcing all queries to add a 'use index' clause.
-          if (tableDescription.hash.name == field) {
+          if (tableDescription.hash.name == field && sortByTableField) {
             None
           } else {
             assumeIndex(
               tableCache,
               tableName = query.from,
               hashKey = field,
-              rangeKey = None
+              rangeKey = None,
+              orderBy = query.orderBy
             )
           }
         }
-        .map { indexName =>
-          table.getIndex(indexName).query(
-            spec.withHashKey(field, unwrap(value))
-          )
+        .map { index =>
+          validateOrderBy(index.hash, index.range, query.orderBy)
+          table.getIndex(index.name)
+            .query(spec.withHashKey(field, unwrap(value)))
         }
         .getOrElse {
+          validateOrderBy(tableDescription.hash, tableDescription.range, query.orderBy)
           table.query(spec.withHashKey(field, unwrap(value)))
         }
       (aggregates, wrap(results))
@@ -478,9 +522,15 @@ object Eval {
 
     //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
     val (aggregates, results) = query.where match {
-      case Some(Ast.PrimaryKey(hash, Some(range))) => querySingle(hash = hash, range = range)
-      case Some(Ast.PrimaryKey(Ast.Key(field, value), None)) => range(field, value)
-      case None => scan()
+      case Some(Ast.PrimaryKey(hash, Some(range))) =>
+        querySingle(hash = hash, range = range)
+      case Some(Ast.PrimaryKey(Ast.Key(field, value), None)) =>
+        range(field, value)
+      case None =>
+        if (query.orderBy.isDefined) {
+          throw new Exception("'order by' is not currently supported on scan queries")
+        }
+        scan()
     }
 
     applyAggregates(aggregates, results)
