@@ -3,7 +3,7 @@ package dynamite
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval.{ AmbiguousIndexException, UnknownTableException }
+import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownIndexException, UnknownTableException }
 import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -23,8 +23,11 @@ class EvalSpec
     rangeKeyTableName
   )
 
+  lazy val tableCache = new TableCache(Eval.describeTable(dynamo, _))
+
   override def beforeEach() = {
     super.beforeEach()
+    tableCache.clear()
     Seed.createTable(tableName, client)
     Seed.createTableWithoutHashKey(rangeKeyTableName, client)
     Seed.insertSeedData(tableName, client)
@@ -32,7 +35,7 @@ class EvalSpec
 
   def run(query: String): Either[Throwable, Response] =
     Parser(query).flatMap {
-      case result: Query => Eval(new DynamoDB(client), result, 20).toEither
+      case result: Query => Eval(dynamo, result, 20, tableCache).toEither
       case _: ReplCommand => ???
     }
 
@@ -171,6 +174,7 @@ class EvalSpec
     )
   }
 
+  // TODO: this could use playlist-name or playlist-name-global
   it should "use an index when unambiguous" in {
     validate(s"select id from $tableName where userId = 'user-id-1' and name = 'EDM4LYFE'", List(List(
       Json.obj("id" -> 2)
@@ -189,10 +193,55 @@ class EvalSpec
   }
 
   it should "use an explicit index when provided" in {
-    validate(s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only", List(List(
-      Json.obj("id" -> 2),
-      Json.obj("id" -> 1)
-    )))
+    validate(
+      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only",
+      List(List(
+        Json.obj("id" -> 2),
+        Json.obj("id" -> 1)
+      ))
+    )
+  }
+
+  it should "fail when index does not exist with hash provided" in {
+    run(
+      s"select id from $tableName where userId = 'user-id-1' use index fake-index"
+    ).left.value shouldBe UnknownIndexException("fake-index")
+  }
+
+  it should "fail when index does not exist with hash and range provided" in {
+    run(
+      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index fake-index"
+    ).left.value shouldBe UnknownIndexException("fake-index")
+  }
+
+  it should "fail when hash key does not match index hash key" in {
+    run(
+      s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
+    ).left.value shouldBe InvalidHashKeyException(
+        Index(
+          "playlist-name",
+          KeySchema("userId", ScalarAttributeType.S), Some(KeySchema("name", ScalarAttributeType.S))
+        ),
+        "name"
+      )
+  }
+
+  it should "query against an explicit index" in {
+    validate(
+      s"select id from $tableName where name = 'Disco Fever' use index playlist-name-global",
+      List(List(
+        Json.obj("id" -> 3)
+      ))
+    )
+  }
+
+  it should "query against an index when unambiguous" in {
+    validate(
+      s"select id from $tableName where name = 'Disco Fever'",
+      List(List(
+        Json.obj("id" -> 3)
+      ))
+    )
   }
 
   "aggregate" should "support count" in {
@@ -219,7 +268,7 @@ class EvalSpec
     )
   }
 
-  it should "return consumed cacpacity" in {
+  it should "return consumed capacity" in {
     run(
       s"select count(*) from $tableName where userId = 'user-id-1'"
     ).right.value should matchPattern {
@@ -236,7 +285,12 @@ class EvalSpec
         "eval-spec",
         KeySchema("userId", ScalarAttributeType.S),
         Some(KeySchema("id", ScalarAttributeType.N)),
-        List(
+        Seq(
+          Index(
+            "playlist-name-global",
+            KeySchema("name", ScalarAttributeType.S),
+            Some(KeySchema("id", ScalarAttributeType.N))
+            ),
           Index(
             "playlist-length",
             KeySchema("userId", ScalarAttributeType.S),
@@ -257,4 +311,10 @@ class EvalSpec
     }
   }
 
+  it should "render an error when table does not exist" in {
+    val result = run(s"describe table non-existent-table")
+    result.right.value should matchPattern {
+      case Response.Info("No table exists with name non-existent-table") =>
+    }
+  }
 }

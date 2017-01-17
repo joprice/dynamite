@@ -112,6 +112,27 @@ class ReplSpec
     )
   }
 
+  //TODO: at least print 0 rows returned?
+  it should "render an empty result" in {
+    val query = "select * from playlists where userId = 'user-id-1';"
+    val writer = new StringWriter()
+    withReader(query) { reader =>
+      Repl.loop(
+        "",
+        new PrintWriter(writer),
+        reader,
+        Ast.Format.Tabular, {
+          case _: Ast.Select =>
+            Success(Response.ResultSet(
+              Iterator.empty
+            ))
+          case _ => ???
+        }
+      )
+    }
+    Ansi.stripAnsi(writer.toString) shouldBe ""
+  }
+
   it should "handle failing pagination" in {
     val writer = new StringWriter()
     val query = s"select * from playlists where userId = 'user-id-1';"

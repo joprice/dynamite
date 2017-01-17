@@ -16,9 +16,8 @@ import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
-import dynamite.Completer.TableCache
 import dynamite.Parser.ParseException
-import dynamite.Response.KeySchema
+import dynamite.Response.{ KeySchema, TableDescription }
 import fansi._
 
 import scala.collection.breakOut
@@ -76,33 +75,30 @@ object Repl {
 
   def handlePage[A, B](
     out: PrintWriter,
-    paging: Paging[Timed[Try[A]]],
+    page: Paging.Page[Timed[Try[A]]],
     reader: Reader
   )(process: A => B): Paging[Timed[Try[A]]] = {
-    paging match {
-      case Paging.Page(Lazy(Timed(value, duration)), next) =>
-        value match {
-          case Success(values) =>
-            //TODO: if results is less than page size, finish early?
-            process(values)
-            out.println(s"Completed in ${duration.toMillis} ms")
-            //TODO: do this next iteration?
-            val nextPage = next()
-            next() match {
-              case Paging.EOF => reader.resetPagination()
-              case _ => out.println("Press q to quit, any key to load next page.")
-            }
-            nextPage
-          //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
-          case Failure(ex) =>
-            reader.resetPagination()
-            //ex.printStackTrace()
-            //println(s"$ex ${ex.getClass} ${ex.getCause}")
-            //TODO: file error logger
-            out.println(formatError(ex.getMessage))
-            Paging.EOF
+    val Lazy(Timed(value, duration)) = page.data
+    value match {
+      case Success(values) =>
+        //TODO: if results is less than page size, finish early?
+        process(values)
+        out.println(s"Completed in ${duration.toMillis} ms")
+        //TODO: do this next iteration?
+        val nextPage = page.next()
+        nextPage match {
+          case Paging.EOF => reader.resetPagination()
+          case _ => out.println("Press q to quit, any key to load next page.")
         }
-      case Paging.EOF => Paging.EOF
+        nextPage
+      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
+      case Failure(ex) =>
+        reader.resetPagination()
+        //ex.printStackTrace()
+        //println(s"$ex ${ex.getClass} ${ex.getCause}")
+        //TODO: file error logger
+        out.println(formatError(ex.getMessage))
+        Paging.EOF
     }
   }
 
@@ -266,9 +262,6 @@ object Repl {
   }
 
   def apply(opts: Opts): Unit = {
-    val client = new Lazy({
-      dynamoClient(opts.endpoint)
-    })
     val config = opts.configFile
       .map(DynamiteConfig.parseConfig)
       .getOrElse {
@@ -278,6 +271,10 @@ object Repl {
           System.err.println(s"Failed to load config: ${error.getMessage}")
           sys.exit(1)
       }.get
+    val endpoint = opts.endpoint.orElse(config.endpoint)
+    val client = new Lazy({
+      dynamoClient(endpoint)
+    })
     apply(client, config)
   }
 
@@ -290,9 +287,9 @@ object Repl {
         // instead felt by the user when making the first query
         val wrapped = client.map(new DynamoDB(_))
 
-        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize)
+        val tableCache = new TableCache(Eval.describeTable(wrapped(), _))
 
-        val tableCache = new TableCache(table => Eval.describeTable(wrapped(), table))
+        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize, tableCache)
 
         val jLineReader = new JLineReader(reader)
         jLineReader.resetPrompt()
@@ -441,4 +438,3 @@ object Repl {
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
 
 }
-

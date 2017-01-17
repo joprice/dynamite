@@ -31,7 +31,7 @@ class CompleterSpec
       )))
       .noMoreThanOnce()
 
-    val cache = new Completer.TableCache(loader)
+    val cache = new TableCache(loader)
     cache.get("playlists")
     cache.get("playlists")
   }

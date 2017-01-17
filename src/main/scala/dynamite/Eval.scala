@@ -16,14 +16,60 @@ import scala.util.{ Failure, Success, Try }
 
 object Eval {
 
-  def apply(dynamo: DynamoDB, query: Query, pageSize: Int): Try[Response] = {
+  def apply(
+    dynamo: DynamoDB,
+    query: Query,
+    pageSize: Int,
+    tableCache: TableCache
+  ): Try[Response] = {
     query match {
-      case query: Select => select(dynamo, query, pageSize)
+      case query: Select => select(dynamo, query, pageSize, tableCache)
       case query: Update => update(dynamo, query)
       case query: Delete => delete(dynamo, query)
       case query: Insert => insert(dynamo, query)
       case ShowTables => showTables(dynamo)
-      case DescribeTable(table) => describeTable(dynamo, table)
+      case DescribeTable(table) =>
+        tableCache.get(table)
+          .map(_.getOrElse(Response.Info(s"No table exists with name $table")))
+    }
+  }
+
+  def assumeIndex(
+    tableCache: TableCache,
+    tableName: String,
+    hashKey: String,
+    rangeKey: Option[String]
+  ): Option[String] = {
+    val table = tableCache.get(tableName)
+      .fold(
+        error => throw error,
+        table => table.getOrElse(throw UnknownTableException(tableName))
+      )
+    val grouped = table.indexes.groupBy(_.hash.name)
+    grouped.get(hashKey).flatMap { candidates =>
+      val results = rangeKey.fold(candidates) { range =>
+        candidates.filter(_.range.exists(_.name == range))
+      }
+      results match {
+        case Seq() => None
+        case Seq(index) => Some(index.name)
+        case indexes => throw AmbiguousIndexException(indexes.map(_.name))
+      }
+    }
+  }
+
+  def validateIndex(
+    tableDescription: TableDescription,
+    indexName: String,
+    hashKey: String,
+    rangeKey: Option[String]
+  ): String = {
+    tableDescription.indexes.find(_.name == indexName).map { index =>
+      if (index.hash.name != hashKey && rangeKey.forall(value => index.range.exists(_.name == value))) {
+        throw InvalidHashKeyException(index, hashKey)
+      } else indexName
+    }.getOrElse {
+      throw UnknownIndexException(indexName)
     }
   }
 
@@ -98,6 +144,7 @@ object Eval {
     }
   }
 
+  //TODO: use UnknownTableException
   def recoverQuery[A](table: String, result: Try[A]) = {
     result.recoverWith {
       case _: ResourceNotFoundException =>
@@ -112,6 +159,14 @@ object Eval {
 
   final case class UnknownTableException(table: String) extends Exception(
     s"Unknown table: $table"
+  )
+
+  final case class UnknownIndexException(index: String) extends Exception(
+    s"Unknown index: $index"
+  )
+
+  final case class InvalidHashKeyException(index: Index, hashKey: String) extends Exception(
+    s"Hash key of '${index.hash.name}' of index '${index.name}' does not match provided hash key '$hashKey'."
   )
 
   object LazySingleIterator {
@@ -253,7 +308,18 @@ object Eval {
     })
   }
 
-  def select(dynamo: DynamoDB, query: Select, pageSize: Int): Try[ResultSet] = Try {
+  def select(dynamo: DynamoDB, query: Select, pageSize: Int, tableCache: TableCache): Try[ResultSet] = Try {
+    //TODO: return instead of throwing
+    lazy val tableDescription = tableCache.get(query.from).fold(
+      {
+        case _: ResourceNotFoundException => throw UnknownTableException(query.from)
+        case error => throw error
+      },
+      table => table.getOrElse(throw UnknownTableException(query.from))
+    )
+
+    val table = dynamo.getTable(query.from)
+
     def wrap[A](results: ItemCollection[A]) = {
       import scala.collection.breakOut
       val it = results.pages.iterator()
@@ -265,9 +331,6 @@ object Eval {
         Some(() => results.getAccumulatedConsumedCapacity)
       )
     }
-
-    //TODO: what to do when field does not exist on object?
-    val table = dynamo.getTable(query.from)
 
     def querySpec() = {
       val spec = new QuerySpec()
@@ -288,19 +351,6 @@ object Eval {
     def querySingle(hash: Key, range: Key) = {
       val Key(hashKey, hashValue) = hash
       val Key(rangeKey, rangeValue) = range
-
-      def assumeIndex = {
-        //TODO: cache this
-        val grouped = describeTable(dynamo, query.from).getOrElse {
-          throw UnknownTableException(query.from)
-        }.indexes.groupBy { index =>
-          (index.hash.name, index.range.map(_.name))
-        }.mapValues(_.map(_.name))
-        grouped.get(hashKey -> Some(rangeKey)).map {
-          case Seq(indexName) => indexName
-          case indexes => throw AmbiguousIndexException(indexes)
-        }
-      }
 
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
       def queryIndex(indexName: String) = {
@@ -337,14 +387,45 @@ object Eval {
       }
 
       //TODO: check types as well?
-      query.useIndex.orElse(assumeIndex)
+      query.useIndex
+        .map(validateIndex(tableDescription, _, hash.field, Some(range.field)))
+        .orElse(assumeIndex(
+          tableCache,
+          tableName = query.from,
+          hashKey = hashKey,
+          rangeKey = Some(rangeKey)
+        ))
         .map(queryIndex)
         .getOrElse(getItem())
     }
 
     def range(field: String, value: KeyValue) = {
       val (aggregates, spec) = querySpec()
-      val results = table.query(spec.withHashKey(field, unwrap(value)))
+
+      val results = query.useIndex
+        .map(validateIndex(tableDescription, _, field, None))
+        .orElse {
+          // If the main table has the correct hash key, use that. Otherwise, check indexes. This is to avoid the
+          // addition of a single local secondary index forcing all queries to add a 'use index' clause.
+          if (tableDescription.hash.name == field) {
+            None
+          } else {
+            assumeIndex(
+              tableCache,
+              tableName = query.from,
+              hashKey = field,
+              rangeKey = None
+            )
+          }
+        }
+        .map { indexName =>
+          table.getIndex(indexName).query(
+            spec.withHashKey(field, unwrap(value))
+          )
+        }
+        .getOrElse {
+          table.query(spec.withHashKey(field, unwrap(value)))
+        }
       (aggregates, wrap(results))
     }
 
@@ -374,4 +455,3 @@ object Eval {
     applyAggregates(aggregates, results)
   }
 }
-

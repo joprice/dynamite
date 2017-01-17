@@ -48,6 +48,20 @@ object Seed {
           new KeySchemaElement("userId", KeyType.HASH),
           new KeySchemaElement("id", KeyType.RANGE)
         )
+        .withGlobalSecondaryIndexes(
+          new GlobalSecondaryIndex()
+            .withIndexName("playlist-name-global")
+            .withKeySchema(
+              new KeySchemaElement("name", KeyType.HASH),
+              new KeySchemaElement("id", KeyType.RANGE)
+            )
+            .withProjection(new Projection().withProjectionType(ProjectionType.ALL))
+            .withProvisionedThroughput(
+              new ProvisionedThroughput()
+                .withReadCapacityUnits(5L)
+                .withWriteCapacityUnits(5L)
+            )
+        )
         .withLocalSecondaryIndexes(
           new LocalSecondaryIndex()
             .withIndexName("playlist-name")
