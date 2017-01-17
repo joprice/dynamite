@@ -75,33 +75,30 @@ object Repl {
 
   def handlePage[A, B](
     out: PrintWriter,
-    paging: Paging[Timed[Try[A]]],
+    page: Paging.Page[Timed[Try[A]]],
     reader: Reader
   )(process: A => B): Paging[Timed[Try[A]]] = {
-    paging match {
-      case Paging.Page(Lazy(Timed(value, duration)), next) =>
-        value match {
-          case Success(values) =>
-            //TODO: if results is less than page size, finish early?
-            process(values)
-            out.println(s"Completed in ${duration.toMillis} ms")
-            //TODO: do this next iteration?
-            val nextPage = next()
-            next() match {
-              case Paging.EOF => reader.resetPagination()
-              case _ => out.println("Press q to quit, any key to load next page.")
-            }
-            nextPage
-          //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
-          case Failure(ex) =>
-            reader.resetPagination()
-            //ex.printStackTrace()
-            //println(s"$ex ${ex.getClass} ${ex.getCause}")
-            //TODO: file error logger
-            out.println(formatError(ex.getMessage))
-            Paging.EOF
+    val Lazy(Timed(value, duration)) = page.data
+    value match {
+      case Success(values) =>
+        //TODO: if results is less than page size, finish early?
+        process(values)
+        out.println(s"Completed in ${duration.toMillis} ms")
+        //TODO: do this next iteration?
+        val nextPage = page.next()
+        nextPage match {
+          case Paging.EOF => reader.resetPagination()
+          case _ => out.println("Press q to quit, any key to load next page.")
         }
-      case Paging.EOF => Paging.EOF
+        nextPage
+      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
+      case Failure(ex) =>
+        reader.resetPagination()
+        //ex.printStackTrace()
+        //println(s"$ex ${ex.getClass} ${ex.getCause}")
+        //TODO: file error logger
+        out.println(formatError(ex.getMessage))
+        Paging.EOF
     }
   }
 

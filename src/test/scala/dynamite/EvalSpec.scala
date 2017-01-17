@@ -235,6 +235,15 @@ class EvalSpec
     )
   }
 
+  it should "query against an index when unambiguous" in {
+    validate(
+      s"select id from $tableName where name = 'Disco Fever'",
+      List(List(
+        Json.obj("id" -> 3)
+      ))
+    )
+  }
+
   "aggregate" should "support count" in {
     validate(s"select count(*) from $tableName", List(List(
       Json.obj("count" -> 4)
@@ -299,6 +308,13 @@ class EvalSpec
             )
           )
         ) =>
+    }
+  }
+
+  it should "render an error when table does not exist" in {
+    val result = run(s"describe table non-existent-table")
+    result.right.value should matchPattern {
+      case Response.Info("No table exists with name non-existent-table") =>
     }
   }
 }

@@ -16,7 +16,12 @@ import scala.util.{ Failure, Success, Try }
 
 object Eval {
 
-  def apply(dynamo: DynamoDB, query: Query, pageSize: Int, tableCache: TableCache): Try[Response] = {
+  def apply(
+    dynamo: DynamoDB,
+    query: Query,
+    pageSize: Int,
+    tableCache: TableCache
+  ): Try[Response] = {
     query match {
       case query: Select => select(dynamo, query, pageSize, tableCache)
       case query: Update => update(dynamo, query)
@@ -29,16 +34,27 @@ object Eval {
     }
   }
 
-  def assumeIndex(tableCache: TableCache, tableName: String, hashKey: String, rangeKey: Option[String]) = {
-    val grouped = tableCache.get(tableName).fold(
-      error => throw error,
-      table => table.getOrElse(throw UnknownTableException(tableName))
-    ).indexes.groupBy { index =>
-        (index.hash.name, index.range.map(_.name))
-      }.mapValues(_.map(_.name))
-    grouped.get(hashKey -> rangeKey).map {
-      case Seq(indexName) => indexName
-      case indexes => throw AmbiguousIndexException(indexes)
+  def assumeIndex(
+    tableCache: TableCache,
+    tableName: String,
+    hashKey: String,
+    rangeKey: Option[String]
+  ): Option[String] = {
+    val table = tableCache.get(tableName)
+      .fold(
+        error => throw error,
+        table => table.getOrElse(throw UnknownTableException(tableName))
+      )
+    val grouped = table.indexes.groupBy(_.hash.name)
+    grouped.get(hashKey).flatMap { candidates =>
+      val results = rangeKey.fold(candidates) { range =>
+        candidates.filter(_.range.exists(_.name == range))
+      }
+      results match {
+        case Seq() => None
+        case Seq(index) => Some(index.name)
+        case indexes => throw AmbiguousIndexException(indexes.map(_.name))
+      }
     }
   }
 
