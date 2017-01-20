@@ -261,8 +261,8 @@ object Repl {
     }
   }
 
-  def apply(opts: Opts): Unit = {
-    val config = opts.configFile
+  def loadConfig(opts: Opts) = {
+    opts.configFile
       .map(DynamiteConfig.parseConfig)
       .getOrElse {
         DynamiteConfig.loadConfig(DynamiteConfig.defaultConfigDir)
@@ -270,7 +270,11 @@ object Repl {
         case error: Throwable =>
           System.err.println(s"Failed to load config: ${error.getMessage}")
           sys.exit(1)
-      }.get
+      }
+  }
+
+  def apply(opts: Opts): Unit = {
+    val config = loadConfig(opts).get
     val endpoint = opts.endpoint.orElse(config.endpoint)
     val client = new Lazy({
       dynamoClient(endpoint)
@@ -342,8 +346,8 @@ object Repl {
     }
   }
 
-  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A): A = {
-    val client = dynamoClient(opts.endpoint)
+  def withClient[A](endpoint: Option[String])(f: AmazonDynamoDB => A): A = {
+    val client = dynamoClient(endpoint)
     try {
       f(client)
     } finally {
