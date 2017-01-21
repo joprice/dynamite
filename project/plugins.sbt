@@ -1,7 +1,7 @@
 
 resolvers += "jenkins" at "http://repo.jenkins-ci.org/public/"
 
-addSbtPlugin("com.localytics" % "sbt-dynamodb" % "1.5.0")
+addSbtPlugin("com.localytics" % "sbt-dynamodb" % "1.5.2")
 
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.3")
 
