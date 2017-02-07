@@ -1,11 +1,11 @@
 package dynamite
 
 import java.io.{ Closeable, File, PrintWriter, StringWriter }
-
+import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
-import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, AmazonDynamoDBClient }
+import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB, AmazonDynamoDBClient }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
@@ -405,10 +405,12 @@ object Repl {
     val config = new ClientConfiguration()
       .withConnectionTimeout(1.second.toMillis.toInt)
       .withSocketTimeout(1.second.toMillis.toInt)
-    endpoint.fold(new AmazonDynamoDBClient()) { endpoint =>
-      new AmazonDynamoDBClient(new BasicAWSCredentials("", ""), config)
-        .withEndpoint[AmazonDynamoDBClient](endpoint)
-    }
+    val builder = AmazonDynamoDBClientBuilder
+      .standard()
+      .withClientConfiguration(config)
+    endpoint.fold(builder) { endpoint =>
+      builder.withEndpointConfiguration(new EndpointConfiguration(endpoint, builder.getRegion))
+    }.build()
   }
 
   def errorLine(line: String, errorIndex: Int) = {
