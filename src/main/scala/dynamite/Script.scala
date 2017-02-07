@@ -55,7 +55,7 @@ object Script {
   def apply(opts: Opts, input: String): Unit = {
     val config = Repl.loadConfig(opts).get
     val endpoint = opts.endpoint.orElse(config.endpoint)
-    Repl.withClient(endpoint) { client =>
+    Repl.withClient(endpoint, None) { client =>
       apply(opts, input, client).left.foreach { reason =>
         Console.err.println(reason)
         sys.exit(1)

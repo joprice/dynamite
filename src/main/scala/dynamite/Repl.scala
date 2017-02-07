@@ -3,7 +3,7 @@ package dynamite
 import java.io.{ Closeable, File, PrintWriter, StringWriter }
 import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
 import com.amazonaws.ClientConfiguration
-import com.amazonaws.auth.BasicAWSCredentials
+import com.amazonaws.auth.AWSCredentialsProvider
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB, AmazonDynamoDBClient }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
@@ -277,7 +277,7 @@ object Repl {
     val config = loadConfig(opts).get
     val endpoint = opts.endpoint.orElse(config.endpoint)
     val client = new Lazy({
-      dynamoClient(endpoint)
+      dynamoClient(endpoint, None)
     })
     apply(client, config)
   }
@@ -346,8 +346,11 @@ object Repl {
     }
   }
 
-  def withClient[A](endpoint: Option[String])(f: AmazonDynamoDB => A): A = {
-    val client = dynamoClient(endpoint)
+  def withClient[A](
+    endpoint: Option[String],
+    credentials: Option[AWSCredentialsProvider]
+  )(f: AmazonDynamoDB => A): A = {
+    val client = dynamoClient(endpoint, credentials)
     try {
       f(client)
     } finally {
@@ -401,16 +404,23 @@ object Repl {
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
-  def dynamoClient(endpoint: Option[String]) = {
+  def dynamoClient(
+    endpoint: Option[String],
+    credentials: Option[AWSCredentialsProvider]
+  ) = {
     val config = new ClientConfiguration()
       .withConnectionTimeout(1.second.toMillis.toInt)
       .withSocketTimeout(1.second.toMillis.toInt)
     val builder = AmazonDynamoDBClientBuilder
       .standard()
       .withClientConfiguration(config)
-    endpoint.fold(builder) { endpoint =>
+    val withEndpoint = endpoint.fold(builder) { endpoint =>
       builder.withEndpointConfiguration(new EndpointConfiguration(endpoint, builder.getRegion))
-    }.build()
+    }
+    credentials.fold(withEndpoint) { credentials =>
+      builder.withCredentials(credentials)
+    }
+      .build()
   }
 
   def errorLine(line: String, errorIndex: Int) = {
