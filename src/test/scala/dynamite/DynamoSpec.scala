@@ -1,8 +1,11 @@
 package dynamite
 
+import com.amazonaws.services.dynamodbv2.model.DeleteTableRequest
+import com.amazonaws.services.dynamodbv2.util.TableUtils
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import org.scalatest._
 import scala.concurrent.duration._
+import com.amazonaws.auth.{ BasicAWSCredentials, AWSStaticCredentialsProvider }
 
 trait DynamoTestClient {
   val dynamoPortKey = "dynamodb.local.port"
@@ -11,7 +14,8 @@ trait DynamoTestClient {
     throw new Exception(s"Failed to find $dynamoPortKey")
   }
 
-  lazy val client = Repl.dynamoClient(Some(s"http://localhost:$dynamoPort"))
+  val credentials = new AWSStaticCredentialsProvider(new BasicAWSCredentials("", ""))
+  lazy val client = Repl.dynamoClient(Some(s"http://127.0.0.1:$dynamoPort"), Some(credentials))
 }
 
 trait DynamoSpec
@@ -26,9 +30,7 @@ trait DynamoSpec
   override def afterEach() = {
     super.afterEach()
     tableNames.foreach { tableName =>
-      val table = dynamo.getTable(tableName)
-      table.delete()
-      table.waitForDelete()
+      TableUtils.deleteTableIfExists(client, new DeleteTableRequest().withTableName(tableName))
     }
   }
 
