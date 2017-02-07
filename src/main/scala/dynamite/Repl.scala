@@ -418,7 +418,7 @@ object Repl {
       builder.withEndpointConfiguration(new EndpointConfiguration(endpoint, builder.getRegion))
     }
     credentials.fold(withEndpoint) { credentials =>
-      builder.withCredentials(credentials)
+      withEndpoint.withCredentials(credentials)
     }
       .build()
   }
