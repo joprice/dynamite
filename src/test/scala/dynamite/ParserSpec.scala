@@ -24,8 +24,8 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate("select * from playlist", Select(Seq(All), "playlist"))
   }
 
-  it should "allow dashes in ident" in {
-    validate("select * from playlist-legacy", Select(Seq(All), "playlist-legacy"))
+  it should "allow dashes and underscores in ident" in {
+    validate("select * from playlist-legacy_1", Select(Seq(All), "playlist-legacy_1"))
   }
 
   it should "parse a single field" in {
