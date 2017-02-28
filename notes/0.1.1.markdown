@@ -1,0 +1,3 @@
+* allow underscores in ident (table names, projections, etc)
+* update aws dynamodb version
+* use config in script mode
