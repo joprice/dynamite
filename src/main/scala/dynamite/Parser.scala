@@ -18,7 +18,7 @@ object Parser {
   val spaces = P(space.rep(1))
 
   //TODO: use .opaque for this
-  val character = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-')))
+  val character = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-', '_')))
 
   //TODO: support hyphens in fields?
   val ident = P(character.rep(1).!)
