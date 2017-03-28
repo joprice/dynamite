@@ -23,7 +23,64 @@ import fansi._
 import scala.collection.breakOut
 import scala.util.{ Failure, Success, Try }
 
+import org.atnos.eff._
+import org.atnos.eff.all._
+import org.atnos.eff.syntax.all._
+import cats._, data._
+import cats.implicits._
+
 object Repl {
+
+  sealed trait Interact[A]
+  final case class Ask(prompt: String) extends Interact[String]
+  final case class Tell(msg: String) extends Interact[Unit]
+
+  type _interact[R] = Interact |= R
+  //type WriterString[A] = Writer[String, A]
+  //type _log[R] = WriterString |= R
+
+  def askUser[R: _interact](prompt: String): Eff[R, String] =
+    send(Ask(prompt))
+
+  def tellUser[R: _interact](message: String): Eff[R, Unit] =
+    send(Tell(message))
+
+  def repl[R: _interact]: Eff[R, Unit] = for {
+    result <- askUser("dql>")
+    _ <- tellUser(s"got $result")
+  } yield ()
+
+  type Stack = Fx.fx1[Interact]
+
+  import org.atnos.eff.interpret._
+  import scala.language.higherKinds
+  import scala.io.StdIn
+
+  def runInteract[R, A](effect: Eff[R, A])(implicit m: Interact <= R): Eff[m.Out, A] =
+    recurse(effect)(new Recurser[Interact, m.Out, A, A] {
+      def onPure(a: A): A = a
+
+      def onEffect[X](i: Interact[X]): X Either Eff[m.Out, A] = Left {
+        i match {
+          case Ask(prompt) =>
+            println(prompt)
+            StdIn.readLine()
+
+          case Tell(msg) =>
+            println(msg)
+        }
+      }
+
+      def onApplicative[X, T[_]: Traverse](ms: T[Interact[X]]): T[X] Either Interact[T[X]] =
+        Left(ms.map {
+          case Ask(prompt) =>
+            println(prompt); StdIn.readLine()
+          case Tell(msg) => println(msg)
+        })
+
+    })(m)
+
+  def test() = runInteract(repl[Stack]).run
 
   type ResultPage = Paging[Timed[Try[PageType]]]
 

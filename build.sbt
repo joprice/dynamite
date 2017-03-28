@@ -26,10 +26,15 @@ libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "com.typesafe" % "config" % "1.3.1",
   "com.iheart" %% "ficus" % "1.4.0",
+  "org.atnos" %% "eff" % "4.0.0",
   "com.typesafe.play" %% "play-json" % "2.6.1" % Test,
   "org.scalatest" %% "scalatest" % "3.0.3" % Test,
   "org.scalamock" %% "scalamock-scalatest-support" % "3.5.0" % Test
 )
+
+addCompilerPlugin("org.spire-math" %% "kind-projector" % "0.9.3")
+
+scalacOptions += "-Ypartial-unification"
 
 dynamoDBLocalVersion := "2016-05-17"
 
