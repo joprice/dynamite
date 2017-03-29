@@ -92,6 +92,13 @@ object Eval {
   def unwrap(value: Value): AnyRef = value match {
     case StringValue(value) => value
     case number: NumberValue => number.value
+    case ObjectValue(values) =>
+      import scala.collection.breakOut
+      val map: Map[String, AnyRef] = values.map {
+        case (key, value) =>
+          key -> unwrap(value)
+      }(breakOut)
+      map.asJava
     case ListValue(value) => value.map(unwrap).asJava
   }
 

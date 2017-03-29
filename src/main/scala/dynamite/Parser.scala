@@ -51,7 +51,13 @@ object Parser {
     "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
   ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
-  val value = P(keyValue | listValue)
+  val objectValue: Parser[ObjectValue] = P(
+    "{" ~/ space.rep ~ commaSeparated(
+      string ~ space.rep ~ ":" ~ space.rep ~ value
+    ) ~ space.rep ~ "}"
+  ).map(values => ObjectValue(values))
+
+  val value = P(keyValue | listValue | objectValue)
 
   //TODO: fail parse on invalid numbers?
   val limit = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))

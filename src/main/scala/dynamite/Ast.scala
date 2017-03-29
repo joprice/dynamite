@@ -92,7 +92,7 @@ object Ast {
 
   final case class ListValue(values: Seq[Value]) extends Value
 
-  final case class Ident(name: String)
+  final case class ObjectValue(values: Seq[(String, Value)]) extends Value
 
   final case class Key(field: String, value: KeyValue)
 
