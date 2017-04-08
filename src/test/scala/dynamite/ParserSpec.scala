@@ -343,6 +343,10 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate("select count(*) from playlist", Select(Seq(Count), "playlist"))
   }
 
+  it should "fail on unknown aggregate" in {
+    Parser("select nonexistent(*) from playlist") should be('left)
+  }
+
   it should "support describing tables" in {
     validate("describe table playlist", DescribeTable("playlist"))
   }

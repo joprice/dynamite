@@ -125,6 +125,28 @@ class EvalSpec
     )
   }
 
+  it should "support updating an object field" in {
+    val first = Seed.seedData.head
+    val userId = (first \ "userId").as[String]
+    val id = (first \ "id").as[Int]
+    run(
+      s"""update $tableName set meta = {
+      "tags": ["rock", "metal"],
+      "visibility": "private"
+      } where userId = '$userId' and id = $id"""
+    ).right.value
+    validate(
+      s"select * from $tableName where userId = '$userId' and id = $id", List(List(
+        first ++ Json.obj(
+          "meta" -> Json.obj(
+            "tags" -> List("rock", "metal"),
+            "visibility" -> "private"
+          )
+        )
+      ))
+    )
+  }
+
   it should "support updating without range key" in {
     val newName = "new title"
     val userId = "user-id-1"
@@ -317,4 +339,15 @@ class EvalSpec
       case Response.Info("No table exists with name non-existent-table") =>
     }
   }
+
+  "lazy iterator" should "iterate once" in {
+    var i = 0
+    val it = Eval.LazySingleIterator(i += 1)
+    it.hasNext shouldBe true
+    it.next()
+    it.hasNext shouldBe false
+    a[NoSuchElementException] should be thrownBy it.next()
+    i shouldBe 1
+  }
+
 }

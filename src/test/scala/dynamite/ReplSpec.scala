@@ -210,7 +210,9 @@ class ReplSpec
 
   it should "support aggregates" in {
     val writer = new StringWriter()
-    val query = s"select count(*) from playlists where userId = 'user-id-1' ;"
+    val query = s"""format tabular;
+                    select count(*) from playlists where userId = 'user-id-1' ;
+    """
     withReader(query) { reader =>
       Repl.loop(
         "",
@@ -228,7 +230,8 @@ class ReplSpec
       )
     }
     writer.toString should be(
-      s"""${Bold.On(Str("count"))}
+      s"""Format set to tabular
+        |${Bold.On(Str("count"))}
         |20
         |
         |Completed in 1000 ms

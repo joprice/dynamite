@@ -82,15 +82,15 @@ object Parser {
 
   val field = P(ident).map(FieldSelector.Field)
 
-  val aggregateFunction = P(keyword("count").!)
+  val aggregateFunction = StringInIgnoreCase("count").!.map(_.toLowerCase)
 
   val aggregate: Parser[Aggregate] = P(
-    aggregateFunction.map(_.toLowerCase) ~ spaces.? ~ "(" ~ spaces.? ~ allFields ~ spaces.? ~ ")"
-  ).map {
-      case ("count", _) => Aggregate.Count
+    aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
+  ).flatMap {
+      case ("count", _) => Pass.map(_ => Aggregate.Count)
       case (other, _) =>
-        //TODO: custom exception with all valid aggregates
-        throw new Exception(s"$other is not a valid aggregate function")
+        //TODO: custom exception with all valid aggregates?
+        Fail.opaque("aggregate function")
     }
 
   val allFields = P("*".!.map(_ => FieldSelector.All))
@@ -174,19 +174,17 @@ object Parser {
     )
   }
 
-  def validate(query: Query): Either[ParseException, Query] = query match {
-    case select: Select =>
-      val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
-        case (state, FieldSelector.All) => state
-        case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
-        case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
-      }
-      if (aggs.nonEmpty && fields.nonEmpty) {
-        Left(ParseException.UnAggregatedFieldsError(fields))
-      } else {
-        Right(select)
-      }
-    case _ => Right(query)
+  def validate(select: Select): Either[ParseException, Query] = {
+    val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
+      case (state, FieldSelector.All) => state
+      case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
+      case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
+    }
+    if (aggs.nonEmpty && fields.nonEmpty) {
+      Left(ParseException.UnAggregatedFieldsError(fields))
+    } else {
+      Right(select)
+    }
   }
 
   def apply(input: String): Either[ParseException, Command] = {
