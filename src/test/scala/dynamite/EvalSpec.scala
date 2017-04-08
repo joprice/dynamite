@@ -3,7 +3,7 @@ package dynamite
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownIndexException, UnknownTableException }
+import dynamite.Eval._
 import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -224,6 +224,31 @@ class EvalSpec
     )
   }
 
+  it should "fail when invalid range key is used with explicit index" in {
+    val index = "playlist-length-keys-only"
+    run(
+      s"select id from $tableName where userId = 'user-id-1' and id = 1 use index $index"
+    ).left.value shouldBe InvalidRangeKeyException(
+        index,
+        KeySchema("duration", ScalarAttributeType.N),
+        "id"
+      )
+  }
+
+  it should "fail when range key is provided for an explicit index that doesn't have a range key" in {
+    val index = "playlist-name-global"
+    run(
+      s"select id from $tableName where name = 'name' and id = 1 use index $index"
+    ).left.value shouldBe UnexpectedRangeKeyException("id")
+  }
+
+  it should "fail when range key is not provided for an explicit index that does have a range key" in {
+    val index = "playlist-length-keys-only"
+    run(
+      s"select id from $tableName where userId = 'user-id-1' use index $index"
+    ).left.value shouldBe MissingRangeKeyException("duration")
+  }
+
   it should "fail when index does not exist with hash provided" in {
     run(
       s"select id from $tableName where userId = 'user-id-1' use index fake-index"
@@ -311,7 +336,7 @@ class EvalSpec
           Index(
             "playlist-name-global",
             KeySchema("name", ScalarAttributeType.S),
-            Some(KeySchema("id", ScalarAttributeType.N))
+            None
             ),
           Index(
             "playlist-length",
