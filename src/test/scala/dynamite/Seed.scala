@@ -52,8 +52,7 @@ object Seed {
           new GlobalSecondaryIndex()
             .withIndexName("playlist-name-global")
             .withKeySchema(
-              new KeySchemaElement("name", KeyType.HASH),
-              new KeySchemaElement("id", KeyType.RANGE)
+              new KeySchemaElement("name", KeyType.HASH)
             )
             .withProjection(new Projection().withProjectionType(ProjectionType.ALL))
             .withProvisionedThroughput(

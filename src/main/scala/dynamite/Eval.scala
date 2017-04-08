@@ -58,6 +58,7 @@ object Eval {
     }
   }
 
+  //TODO: switch to either/try
   def validateIndex(
     tableDescription: TableDescription,
     indexName: String,
@@ -65,9 +66,19 @@ object Eval {
     rangeKey: Option[String]
   ): String = {
     tableDescription.indexes.find(_.name == indexName).map { index =>
-      if (index.hash.name != hashKey && rangeKey.forall(value => index.range.exists(_.name == value))) {
+      if (index.hash.name != hashKey) {
         throw InvalidHashKeyException(index, hashKey)
-      } else indexName
+      } else {
+        (rangeKey, index.range) match {
+          case (Some(left), Some(right)) if left != right.name =>
+            throw InvalidRangeKeyException(index.name, right, left)
+          case (Some(left), None) =>
+            throw UnexpectedRangeKeyException(left)
+          case (None, Some(right)) =>
+            throw MissingRangeKeyException(right.name)
+          case _ => indexName
+        }
+      }
     }.getOrElse {
       throw UnknownIndexException(indexName)
     }
@@ -92,6 +103,13 @@ object Eval {
   def unwrap(value: Value): AnyRef = value match {
     case StringValue(value) => value
     case number: NumberValue => number.value
+    case ObjectValue(values) =>
+      import scala.collection.breakOut
+      val map: Map[String, AnyRef] = values.map {
+        case (key, value) =>
+          key -> unwrap(value)
+      }(breakOut)
+      map.asJava
     case ListValue(value) => value.map(unwrap).asJava
   }
 
@@ -167,6 +185,18 @@ object Eval {
 
   final case class InvalidHashKeyException(index: Index, hashKey: String) extends Exception(
     s"Hash key of '${index.hash.name}' of index '${index.name}' does not match provided hash key '$hashKey'."
+  )
+
+  final case class MissingRangeKeyException(rangeKey: String) extends Exception(
+    s"Missing range key $rangeKey"
+  )
+
+  final case class UnexpectedRangeKeyException(rangeKey: String) extends Exception(
+    s"Unexpected range key $rangeKey"
+  )
+
+  final case class InvalidRangeKeyException(indexName: String, range: KeySchema, rangeKey: String) extends Exception(
+    s"Range key of '${range.name}' of index '${indexName}' does not match provided hash key '$rangeKey'."
   )
 
   object LazySingleIterator {

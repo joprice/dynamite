@@ -153,6 +153,44 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     )
   }
 
+  it should "support updating object values" in {
+    validate(
+      """update playlist set meta = { "tags": ["rock", "metal"], "visibility": "private" } where id = 1""",
+      Update(
+        "playlist",
+        Seq(
+          "meta" -> ObjectValue(Seq(
+            "tags" -> ListValue(Seq(
+              StringValue("rock"),
+              StringValue("metal")
+            )),
+            "visibility" -> StringValue("private")
+          ))
+        ),
+        PrimaryKey(Key("id", IntValue("1")), None)
+      )
+    )
+  }
+
+  it should "support tolerate whitespace in object values" in {
+    validate(
+      """update playlist set meta = {"tags":["rock" ,"metal"], "visibility": "private"} where id = 1""",
+      Update(
+        "playlist",
+        Seq(
+          "meta" -> ObjectValue(Seq(
+            "tags" -> ListValue(Seq(
+              StringValue("rock"),
+              StringValue("metal")
+            )),
+            "visibility" -> StringValue("private")
+          ))
+        ),
+        PrimaryKey(Key("id", IntValue("1")), None)
+      )
+    )
+  }
+
   it should "support array values " in {
     validate(
       "insert into playlists (id, tracks) values (1, [1,2,3])",
@@ -303,6 +341,10 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   it should "support count" in {
     validate("select count(*) from playlist", Select(Seq(Count), "playlist"))
+  }
+
+  it should "fail on unknown aggregate" in {
+    Parser("select nonexistent(*) from playlist") should be('left)
   }
 
   it should "support describing tables" in {

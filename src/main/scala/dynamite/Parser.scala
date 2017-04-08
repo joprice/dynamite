@@ -11,7 +11,8 @@ object Parser {
 
   def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
 
-  def commaSeparated[A](parser: Parser[A]) = parser.rep(1, sep = "," ~/ space.rep)
+  def commaSeparated[A](parser: Parser[A]) =
+    parser.rep(1, sep = space.rep ~ "," ~/ space.rep)
 
   val space = P(" " | "\n")
 
@@ -51,7 +52,13 @@ object Parser {
     "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
   ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
-  val value = P(keyValue | listValue)
+  val objectValue: Parser[ObjectValue] = P(
+    "{" ~/ space.rep ~ commaSeparated(
+      string ~ space.rep ~ ":" ~ space.rep ~ value
+    ) ~ space.rep ~ "}"
+  ).map(values => ObjectValue(values))
+
+  val value = P(keyValue | listValue | objectValue)
 
   //TODO: fail parse on invalid numbers?
   val limit = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
@@ -75,15 +82,15 @@ object Parser {
 
   val field = P(ident).map(FieldSelector.Field)
 
-  val aggregateFunction = P(keyword("count").!)
+  val aggregateFunction = StringInIgnoreCase("count").!.map(_.toLowerCase)
 
   val aggregate: Parser[Aggregate] = P(
-    aggregateFunction.map(_.toLowerCase) ~ spaces.? ~ "(" ~ spaces.? ~ allFields ~ spaces.? ~ ")"
-  ).map {
-      case ("count", _) => Aggregate.Count
+    aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
+  ).flatMap {
+      case ("count", _) => Pass.map(_ => Aggregate.Count)
       case (other, _) =>
-        //TODO: custom exception with all valid aggregates
-        throw new Exception(s"$other is not a valid aggregate function")
+        //TODO: custom exception with all valid aggregates?
+        Fail.opaque("aggregate function")
     }
 
   val allFields = P("*".!.map(_ => FieldSelector.All))
@@ -167,19 +174,17 @@ object Parser {
     )
   }
 
-  def validate(query: Query): Either[ParseException, Query] = query match {
-    case select: Select =>
-      val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
-        case (state, FieldSelector.All) => state
-        case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
-        case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
-      }
-      if (aggs.nonEmpty && fields.nonEmpty) {
-        Left(ParseException.UnAggregatedFieldsError(fields))
-      } else {
-        Right(select)
-      }
-    case _ => Right(query)
+  def validate(select: Select): Either[ParseException, Query] = {
+    val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
+      case (state, FieldSelector.All) => state
+      case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
+      case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
+    }
+    if (aggs.nonEmpty && fields.nonEmpty) {
+      Left(ParseException.UnAggregatedFieldsError(fields))
+    } else {
+      Right(select)
+    }
   }
 
   def apply(input: String): Either[ParseException, Command] = {

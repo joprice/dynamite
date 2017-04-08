@@ -3,7 +3,7 @@ package dynamite
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval.{ AmbiguousIndexException, InvalidHashKeyException, UnknownIndexException, UnknownTableException }
+import dynamite.Eval._
 import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
 import org.scalatest._
 import play.api.libs.json.Json
@@ -125,6 +125,28 @@ class EvalSpec
     )
   }
 
+  it should "support updating an object field" in {
+    val first = Seed.seedData.head
+    val userId = (first \ "userId").as[String]
+    val id = (first \ "id").as[Int]
+    run(
+      s"""update $tableName set meta = {
+      "tags": ["rock", "metal"],
+      "visibility": "private"
+      } where userId = '$userId' and id = $id"""
+    ).right.value
+    validate(
+      s"select * from $tableName where userId = '$userId' and id = $id", List(List(
+        first ++ Json.obj(
+          "meta" -> Json.obj(
+            "tags" -> List("rock", "metal"),
+            "visibility" -> "private"
+          )
+        )
+      ))
+    )
+  }
+
   it should "support updating without range key" in {
     val newName = "new title"
     val userId = "user-id-1"
@@ -200,6 +222,31 @@ class EvalSpec
         Json.obj("id" -> 1)
       ))
     )
+  }
+
+  it should "fail when invalid range key is used with explicit index" in {
+    val index = "playlist-length-keys-only"
+    run(
+      s"select id from $tableName where userId = 'user-id-1' and id = 1 use index $index"
+    ).left.value shouldBe InvalidRangeKeyException(
+        index,
+        KeySchema("duration", ScalarAttributeType.N),
+        "id"
+      )
+  }
+
+  it should "fail when range key is provided for an explicit index that doesn't have a range key" in {
+    val index = "playlist-name-global"
+    run(
+      s"select id from $tableName where name = 'name' and id = 1 use index $index"
+    ).left.value shouldBe UnexpectedRangeKeyException("id")
+  }
+
+  it should "fail when range key is not provided for an explicit index that does have a range key" in {
+    val index = "playlist-length-keys-only"
+    run(
+      s"select id from $tableName where userId = 'user-id-1' use index $index"
+    ).left.value shouldBe MissingRangeKeyException("duration")
   }
 
   it should "fail when index does not exist with hash provided" in {
@@ -289,7 +336,7 @@ class EvalSpec
           Index(
             "playlist-name-global",
             KeySchema("name", ScalarAttributeType.S),
-            Some(KeySchema("id", ScalarAttributeType.N))
+            None
             ),
           Index(
             "playlist-length",
@@ -317,4 +364,15 @@ class EvalSpec
       case Response.Info("No table exists with name non-existent-table") =>
     }
   }
+
+  "lazy iterator" should "iterate once" in {
+    var i = 0
+    val it = Eval.LazySingleIterator(i += 1)
+    it.hasNext shouldBe true
+    it.next()
+    it.hasNext shouldBe false
+    a[NoSuchElementException] should be thrownBy it.next()
+    i shouldBe 1
+  }
+
 }
