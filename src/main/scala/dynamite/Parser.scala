@@ -11,7 +11,8 @@ object Parser {
 
   def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
 
-  def commaSeparated[A](parser: Parser[A]) = parser.rep(1, sep = "," ~/ space.rep)
+  def commaSeparated[A](parser: Parser[A]) =
+    parser.rep(1, sep = space.rep ~ "," ~/ space.rep)
 
   val space = P(" " | "\n")
 
