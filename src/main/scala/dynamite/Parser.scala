@@ -187,7 +187,7 @@ object Parser {
     }
   }
 
-  def apply(input: String): Either[ParseException, Command] = {
+  def parse(input: String): Either[ParseException, Command] = {
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     import fastparse.core.Parsed.{ Failure, Success }
     query.parse(input) match {

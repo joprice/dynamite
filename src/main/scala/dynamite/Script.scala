@@ -64,7 +64,7 @@ object Script {
   }
 
   def apply(opts: Opts, input: String, client: AmazonDynamoDB): Either[String, Unit] = {
-    Parser(input.trim.stripSuffix(";")).fold({ failure =>
+    Parser.parse(input.trim.stripSuffix(";")).fold({ failure =>
       Left(Ansi.stripAnsi(Repl.parseError(input, failure)))
     }, {
       case query: Query =>

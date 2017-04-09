@@ -273,14 +273,14 @@ class ReplSpec
 
   "parseError" should "render unaggregated fields error" in {
     val query = "select count(*), id from playlist"
-    val failure = Parser(query).left.value
+    val failure = Parser.parse(query).left.value
     val error = Repl.parseError("select count(*), id from playlist", failure)
     error shouldBe Repl.formatError("Aggregates may not be used with unaggregated fields")
   }
 
   it should "render parse error" in {
     val query = "select count(*) fron playlist"
-    val failure = Parser(query).left.value
+    val failure = Parser.parse(query).left.value
     val error = Repl.parseError(query, failure)
     val result = s"""[error] Failed to parse query
        |select count(*) fron playlist
@@ -293,7 +293,7 @@ class ReplSpec
         |select count(*)
         |
         |fron playlist""".stripMargin
-    val failure = Parser(query).left.value
+    val failure = Parser.parse(query).left.value
     val error = Repl.parseError(query, failure)
     val result = s"""[error] Failed to parse query
                     |fron playlist

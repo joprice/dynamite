@@ -19,14 +19,14 @@ addCommandAlias("validate", Seq(
 
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "0.4.2",
-  "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.86",
+  "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.118",
   "jline" % "jline" % "2.14.3",
   "com.lihaoyi" %% "fansi" % "0.2.3",
   "com.github.scopt" %% "scopt" % "3.5.0",
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "com.typesafe" % "config" % "1.3.1",
   "com.iheart" %% "ficus" % "1.4.0",
-  "com.typesafe.play" %% "play-json" % "2.6.0-M2" % Test,
+  "com.typesafe.play" %% "play-json" % "2.6.0-M6" % Test,
   "org.scalatest" %% "scalatest" % "3.0.1" % Test,
   "org.scalamock" %% "scalamock-scalatest-support" % "3.5.0" % Test
 )
