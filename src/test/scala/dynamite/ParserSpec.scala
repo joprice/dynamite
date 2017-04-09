@@ -9,7 +9,7 @@ import dynamite.Ast.Projection.FieldSelector._
 class ParserSpec extends FlatSpec with Matchers with EitherValues {
 
   def parse(query: String) = {
-    val result = Parser(query)
+    val result = Parser.parse(query)
     result.left.foreach { error =>
       println(error.getCause.getMessage)
     }
@@ -336,7 +336,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
   }
 
   it should "fail on empty table name" in {
-    Parser("select * from ") should be('left)
+    Parser.parse("select * from ") should be('left)
   }
 
   it should "support count" in {
@@ -344,7 +344,7 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
   }
 
   it should "fail on unknown aggregate" in {
-    Parser("select nonexistent(*) from playlist") should be('left)
+    Parser.parse("select nonexistent(*) from playlist") should be('left)
   }
 
   it should "support describing tables" in {

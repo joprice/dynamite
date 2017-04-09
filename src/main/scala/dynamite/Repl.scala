@@ -227,7 +227,7 @@ object Repl {
           val s = trimmed.stripSuffix(";")
           if (buffer.nonEmpty) s"$buffer\n$s" else s
         }
-        val newFormat = Parser(stripped)
+        val newFormat = Parser.parse(stripped)
           .fold({ failure =>
             out.println(parseError(stripped, failure))
             format

@@ -34,7 +34,7 @@ class EvalSpec
   }
 
   def run(query: String): Either[Throwable, Response] =
-    Parser(query).flatMap {
+    Parser.parse(query).flatMap {
       case result: Query => Eval(dynamo, result, 20, tableCache).toEither
       case _: ReplCommand => ???
     }
