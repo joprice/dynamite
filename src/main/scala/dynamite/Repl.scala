@@ -94,8 +94,8 @@ object Repl {
       //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
       case Failure(ex) =>
         reader.resetPagination()
-        //ex.printStackTrace()
-        //println(s"$ex ${ex.getClass} ${ex.getCause}")
+        ex.printStackTrace()
+        println(s"$ex ${ex.getClass} ${ex.getCause}")
         //TODO: file error logger
         out.println(formatError(ex.getMessage))
         Paging.EOF
@@ -329,6 +329,7 @@ object Repl {
           .sorted
       case FieldSelector.Field(field) => Seq(field)
       case count: Aggregate.Count.type => Seq(count.name)
+      case length: Aggregate.Length => Seq(length.name)
     }
   }
 

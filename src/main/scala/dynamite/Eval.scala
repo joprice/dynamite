@@ -17,6 +17,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import dynamite.Response._
 
@@ -144,6 +145,8 @@ object Eval {
         case (state, FieldSelector.All) => state
         case ((aggregates, fields), FieldSelector.Field(field)) => (aggregates, fields :+ field)
         case ((aggregates, fields), count: Aggregate.Count.type) => (aggregates :+ count, fields)
+        case ((aggregates, fields), length @ Aggregate.Length(FieldSelector.Field(field))) =>
+          (aggregates :+ length, fields :+ field)
       }
       fields
     }
@@ -156,6 +159,28 @@ object Eval {
     // For now, using headOption, since the only aggregate supported at the moment is Count(*) and duplicate
     // aggregates will be resolved by reference
     aggregates.headOption.fold(resultSet) {
+      case agg @ Aggregate.Length(FieldSelector.Field(field)) =>
+        resultSet.copy(
+          resultSet.results.map {
+            case Timed(results, duration) =>
+              val updated = results.map { value =>
+                value.map {
+                  case node: ObjectNode =>
+                    println(node)
+                    //TODO: check if array or object
+                    Option(node.get(field)).foreach { value =>
+                      if (value.isArray || value.isObject) {
+                        node.put(agg.name, value.size)
+                      }
+                    }
+                    node
+                  case other => other
+                }
+              }
+              Timed(updated, duration)
+            //agg.name
+          }
+        )
       case agg: Aggregate.Count.type =>
         resultSet.copy(
           results = LazySingleIterator {

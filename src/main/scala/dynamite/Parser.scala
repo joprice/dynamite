@@ -92,12 +92,23 @@ object Parser {
 
   val field = P(ident).map(FieldSelector.Field)
 
-  val aggregateFunction = StringInIgnoreCase("count").!.map(_.toLowerCase)
+  val aggregateFunction = P(
+    StringInIgnoreCase(
+      "count", "length"
+    ).!.map(_.toLowerCase)
+  )
 
   val aggregate: Parser[Aggregate] = P(
-    aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
+    aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ fieldSelector ~ spaces.? ~ ")"
   ).flatMap {
-      case ("count", _) => Pass.map(_ => Aggregate.Count)
+      case ("length", field: FieldSelector.Field) =>
+        Pass.map(_ => Aggregate.Length(field))
+      case ("length", _) =>
+        Fail.opaque("length may only be used with a single field")
+      case ("count", FieldSelector.All) =>
+        Pass.map(_ => Aggregate.Count)
+      case ("count", _) =>
+        Fail.opaque("count may only be used with *")
       case (other, _) =>
         //TODO: custom exception with all valid aggregates?
         Fail.opaque("aggregate function")
@@ -184,13 +195,15 @@ object Parser {
     )
   }
 
+  //TODO: unify withresolveProjection in Eval
   def validate(select: Select): Either[ParseException, Query] = {
     val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
       case (state, FieldSelector.All) => state
       case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
       case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
+      case ((aggs, fields), length @ Aggregate.Length(FieldSelector.Field(field))) => (aggs :+ length, fields :+ field)
     }
-    if (aggs.nonEmpty && fields.nonEmpty) {
+    if (aggs.contains(Aggregate.Count) && fields.nonEmpty) {
       Left(ParseException.UnAggregatedFieldsError(fields))
     } else {
       Right(select)

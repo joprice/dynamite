@@ -68,6 +68,7 @@ object Ast {
       //TODO: for now, field name is same as function, should add aliases
       //TODO: for now, not accepting a projection. In the future arbitrary should be selected, which would sum non-null values
       case object Count extends Aggregate("count")
+      case class Length(fields: FieldSelector.Field) extends Aggregate("length")
     }
 
     sealed abstract class FieldSelector extends Projection
