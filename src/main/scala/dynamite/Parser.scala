@@ -38,7 +38,7 @@ object Parser {
   }).!
 
   val float = P("-".? ~ integer.? ~ "." ~ integer).!
-  val boolValue = P(
+  val boolValue: Parser[BoolValue] = P(
     P("true").map(_ => BoolValue(true)) |
       P("false").map(_ => BoolValue(false))
   )
