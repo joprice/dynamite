@@ -6,7 +6,6 @@ import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast._
 import jline.internal.Ansi
-
 import scala.util.{ Failure, Success, Try }
 
 object Script {
@@ -52,9 +51,7 @@ object Script {
   }
 
   def apply(opts: Opts, input: String): Unit = {
-    val config = Repl.loadConfig(opts).get
-    val endpoint = opts.endpoint.orElse(config.endpoint)
-    Repl.withClient(endpoint, None) { client =>
+    Repl.withClient(opts) { client =>
       apply(opts, input, client).left.foreach { reason =>
         Console.err.println(reason)
         sys.exit(1)

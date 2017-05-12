@@ -3,7 +3,6 @@ package dynamite
 import java.io.{ Closeable, File, PrintWriter, StringWriter }
 import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
 import com.amazonaws.ClientConfiguration
-import com.amazonaws.auth.AWSCredentialsProvider
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
@@ -11,7 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
-
 import scala.concurrent.duration._
 import scala.collection.JavaConverters._
 import scala.annotation.tailrec
@@ -19,9 +17,10 @@ import dynamite.Ast._
 import dynamite.Parser.ParseException
 import dynamite.Response.KeySchema
 import fansi._
-
 import scala.collection.breakOut
 import scala.util.{ Failure, Success, Try }
+import com.amazonaws.auth.profile.ProfileCredentialsProvider
+import com.amazonaws.auth.AWSCredentialsProvider
 
 object Repl {
 
@@ -275,10 +274,7 @@ object Repl {
 
   def apply(opts: Opts): Unit = {
     val config = loadConfig(opts).get
-    val endpoint = opts.endpoint.orElse(config.endpoint)
-    val client = new Lazy({
-      dynamoClient(endpoint, None)
-    })
+    val client = new Lazy(dynamoClient(config, opts))
     apply(client, config)
   }
 
@@ -346,11 +342,9 @@ object Repl {
     }
   }
 
-  def withClient[A](
-    endpoint: Option[String],
-    credentials: Option[AWSCredentialsProvider]
-  )(f: AmazonDynamoDB => A): A = {
-    val client = dynamoClient(endpoint, credentials)
+  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A): A = {
+    val config = loadConfig(opts).get
+    val client = dynamoClient(config, opts)
     try {
       f(client)
     } finally {
@@ -404,16 +398,24 @@ object Repl {
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
+  def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDB = {
+    val endpoint = opts.endpoint.orElse(config.endpoint)
+    val credentials = opts.profile.map {
+      new ProfileCredentialsProvider(_)
+    }
+    dynamoClient(endpoint, credentials)
+  }
+
   def dynamoClient(
     endpoint: Option[String],
     credentials: Option[AWSCredentialsProvider]
-  ) = {
-    val config = new ClientConfiguration()
+  ): AmazonDynamoDB = {
+    val clientConfig = new ClientConfiguration()
       .withConnectionTimeout(1.second.toMillis.toInt)
       .withSocketTimeout(1.second.toMillis.toInt)
     val builder = AmazonDynamoDBClientBuilder
       .standard()
-      .withClientConfiguration(config)
+      .withClientConfiguration(clientConfig)
     val withEndpoint = endpoint.fold(builder) { endpoint =>
       builder.withEndpointConfiguration(new EndpointConfiguration(endpoint, builder.getRegion))
     }

@@ -18,9 +18,12 @@ addCommandAlias("validate", Seq(
   "coverageReport"
 ).mkString(";", ";", ""))
 
+val awsVersion = "1.11.642"
+
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "0.4.4",
-  "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.642",
+  "com.amazonaws" % "aws-java-sdk-dynamodb" % awsVersion,
+  "com.amazonaws" % "aws-java-sdk-sts" % awsVersion,
   "jline" % "jline" % "2.14.6",
   "com.lihaoyi" %% "fansi" % "0.2.7",
   "com.github.scopt" %% "scopt" % "3.7.1",
