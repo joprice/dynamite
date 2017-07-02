@@ -6,7 +6,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.12.1"
+scalaVersion := "2.12.2"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -18,16 +18,16 @@ addCommandAlias("validate", Seq(
 ).mkString(";", ";", ""))
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "fastparse" % "0.4.2",
-  "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.118",
-  "jline" % "jline" % "2.14.3",
-  "com.lihaoyi" %% "fansi" % "0.2.3",
-  "com.github.scopt" %% "scopt" % "3.5.0",
+  "com.lihaoyi" %% "fastparse" % "0.4.3",
+  "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.158",
+  "jline" % "jline" % "2.14.5",
+  "com.lihaoyi" %% "fansi" % "0.2.4",
+  "com.github.scopt" %% "scopt" % "3.6.0",
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "com.typesafe" % "config" % "1.3.1",
   "com.iheart" %% "ficus" % "1.4.0",
-  "com.typesafe.play" %% "play-json" % "2.6.0-M6" % Test,
-  "org.scalatest" %% "scalatest" % "3.0.1" % Test,
+  "com.typesafe.play" %% "play-json" % "2.6.1" % Test,
+  "org.scalatest" %% "scalatest" % "3.0.3" % Test,
   "org.scalamock" %% "scalamock-scalatest-support" % "3.5.0" % Test
 )
 

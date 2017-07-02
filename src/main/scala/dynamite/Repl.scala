@@ -5,7 +5,7 @@ import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.AWSCredentialsProvider
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
-import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB, AmazonDynamoDBClient }
+import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB }
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
@@ -17,7 +17,7 @@ import scala.collection.JavaConverters._
 import scala.annotation.tailrec
 import dynamite.Ast._
 import dynamite.Parser.ParseException
-import dynamite.Response.{ KeySchema, TableDescription }
+import dynamite.Response.KeySchema
 import fansi._
 
 import scala.collection.breakOut

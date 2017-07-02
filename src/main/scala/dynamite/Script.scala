@@ -5,7 +5,6 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast._
-import dynamite.Response.TableDescription
 import jline.internal.Ansi
 
 import scala.util.{ Failure, Success, Try }
