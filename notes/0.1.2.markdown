@@ -1,0 +1,3 @@
+* allow updating object fields
+* improve index errors
+* update dynamo client 
