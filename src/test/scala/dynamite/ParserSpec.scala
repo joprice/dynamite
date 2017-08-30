@@ -380,6 +380,9 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     parse(
       """insert into playlists (userId, id, curated) values ("user-1", "id-1", true)"""
     )
+    parse(
+      """insert into playlists (userId, id, curated) values ("user-1", "id-1", false)"""
+    )
   }
 }
 

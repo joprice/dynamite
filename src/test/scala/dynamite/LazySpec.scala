@@ -38,5 +38,18 @@ class LazySpec
     l.accessed shouldBe true
   }
 
+  it should "update mapped value" in {
+    var count = 0
+    val l = Lazy {
+      count += 1
+      count
+    }.map(_ + 1)
+    val value = l()
+    val second = l()
+    count shouldBe 1
+    value shouldBe 2
+    second shouldBe 2
+  }
+
 }
 
