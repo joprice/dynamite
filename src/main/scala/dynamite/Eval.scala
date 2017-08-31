@@ -101,6 +101,7 @@ object Eval {
   }
 
   def unwrap(value: Value): AnyRef = value match {
+    case BoolValue(value) => value: java.lang.Boolean
     case StringValue(value) => value
     case number: NumberValue => number.value
     case ObjectValue(values) =>

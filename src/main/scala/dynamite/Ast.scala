@@ -81,6 +81,7 @@ object Ast {
   sealed abstract class KeyValue extends Value
 
   final case class StringValue(value: String) extends KeyValue
+  final case class BoolValue(value: Boolean) extends KeyValue
 
   /**
    * NOTE: The constructors of IntValue and FloatValue keep their original string

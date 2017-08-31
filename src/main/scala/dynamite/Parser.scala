@@ -38,7 +38,10 @@ object Parser {
   }).!
 
   val float = P("-".? ~ integer.? ~ "." ~ integer).!
-
+  val boolValue = P(
+    P("true").map(_ => BoolValue(true)) |
+      P("false").map(_ => BoolValue(false))
+  )
   val stringValue = P(string.map(StringValue))
   val floatValue = P(float.map(FloatValue))
   val integerValue = P(integer.map(IntValue))
@@ -58,7 +61,7 @@ object Parser {
     ) ~ space.rep ~ "}"
   ).map(values => ObjectValue(values))
 
-  val value = P(keyValue | listValue | objectValue)
+  val value = P(keyValue | listValue | objectValue | boolValue)
 
   //TODO: fail parse on invalid numbers?
   val limit = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
