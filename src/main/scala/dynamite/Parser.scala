@@ -81,6 +81,13 @@ object Parser {
       P(keyword("desc")).map(_ => Descending)
   )
 
+  val orderBy = P(
+    (keyword("order") ~/ spaces ~ keyword("by") ~ spaces ~ ident) ~ opt(direction)
+  ).map {
+      case (field, direction) =>
+        OrderBy(field, direction)
+    }
+
   val from = P(keyword("from") ~ spaces ~ ident)
 
   val field = P(ident).map(FieldSelector.Field)
@@ -118,7 +125,7 @@ object Parser {
       projections ~ spaces ~
       from ~
       opt(primaryKey) ~
-      opt(direction) ~
+      opt(orderBy) ~
       opt(limit) ~
       opt(useIndex)
   ).map(Select.tupled)
