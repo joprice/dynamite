@@ -24,7 +24,7 @@ jobs:
       - restore_cache:
           key: sbt-cache
       - run:
-          name: Compile samplescala dist package
+          name: validate
           command: cat /dev/null | sbt validate
       - store_artifacts: # for display in Artifacts: https://circleci.com/docs/2.0/artifacts/
           path: target/universal/samplescala.zip
