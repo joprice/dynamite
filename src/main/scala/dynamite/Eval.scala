@@ -1,10 +1,20 @@
 package dynamite
 
 import com.amazonaws.jmespath.ObjectMapperSingleton
-import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
+import com.amazonaws.services.dynamodbv2.document.{
+  PrimaryKey => DynamoPrimaryKey,
+  Index => _,
+  _
+}
 import com.amazonaws.services.dynamodbv2.document.spec._
 import dynamite.Ast.{ PrimaryKey => _, _ }
-import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
+import com.amazonaws.services.dynamodbv2.model.{
+  Select => _,
+  Delete => _,
+  TableDescription => _,
+  Update => _,
+  _
+}
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
@@ -230,7 +240,7 @@ object Eval {
   }
 
   class TimedRecoveringIterator[A](
-      original: Iterator[A]
+    original: Iterator[A]
   ) extends Iterator[Timed[Try[A]]] {
     private[this] val recovering = new RecoveringIterator[A](original)
 
@@ -243,8 +253,8 @@ object Eval {
   }
 
   class TableIterator[A](
-      select: Select,
-      original: Iterator[Iterator[JsonNode]]
+    select: Select,
+    original: Iterator[Iterator[JsonNode]]
   ) extends Iterator[Timed[Try[List[JsonNode]]]] {
     private[this] val recovering = new RecoveringIterator(original)
 

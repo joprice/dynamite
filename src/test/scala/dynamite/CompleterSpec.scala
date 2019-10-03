@@ -8,10 +8,10 @@ import org.scalatest._
 import scala.util.{ Success, Try }
 
 class CompleterSpec
-    extends FlatSpec
-    with Matchers
-    with MockFactory
-    with OptionValues {
+  extends FlatSpec
+  with Matchers
+  with MockFactory
+  with OptionValues {
 
   "table parser" should "parse a projection" in {
     Completer.tableParser.parse("select * from tableName") should matchPattern {

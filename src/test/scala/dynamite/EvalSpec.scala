@@ -9,11 +9,11 @@ import org.scalatest._
 import play.api.libs.json.Json
 
 class EvalSpec
-    extends FlatSpec
-    with Matchers
-    with DynamoSpec
-    with TryValues
-    with EitherValues {
+  extends FlatSpec
+  with Matchers
+  with DynamoSpec
+  with TryValues
+  with EitherValues {
 
   val tableName = "eval-spec"
   val rangeKeyTableName = "eval-spec-range-key"
@@ -85,8 +85,8 @@ class EvalSpec
     validate(
       s"select * from $tableName where userId = 'user-id-1' order by id desc", List(
         Seed.seedData
-        .filter(json => (json \ "userId").as[String] == "user-id-1")
-        .reverse
+          .filter(json => (json \ "userId").as[String] == "user-id-1")
+          .reverse
       )
     )
   }

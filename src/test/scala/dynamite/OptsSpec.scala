@@ -6,9 +6,9 @@ import java.nio.charset.StandardCharsets
 import org.scalatest._
 
 class OptsSpec
-    extends FlatSpec
-    with Matchers
-    with OptionValues {
+  extends FlatSpec
+  with Matchers
+  with OptionValues {
 
   def captureStdErr[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
