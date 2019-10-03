@@ -1,10 +1,20 @@
 package dynamite
 
 import com.amazonaws.jmespath.ObjectMapperSingleton
-import com.amazonaws.services.dynamodbv2.document.{ PrimaryKey => DynamoPrimaryKey, Index => _, _ }
+import com.amazonaws.services.dynamodbv2.document.{
+  PrimaryKey => DynamoPrimaryKey,
+  Index => _,
+  _
+}
 import com.amazonaws.services.dynamodbv2.document.spec._
 import dynamite.Ast.{ PrimaryKey => _, _ }
-import com.amazonaws.services.dynamodbv2.model.{ Select => _, TableDescription => _, _ }
+import com.amazonaws.services.dynamodbv2.model.{
+  Select => _,
+  Delete => _,
+  TableDescription => _,
+  Update => _,
+  _
+}
 import com.amazonaws.util.json.Jackson
 import com.fasterxml.jackson.databind.JsonNode
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }

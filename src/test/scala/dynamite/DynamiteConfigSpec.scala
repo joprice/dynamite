@@ -32,10 +32,10 @@ object DynamiteConfigSpec {
 }
 
 class DynamiteConfigSpec
-    extends FlatSpec
-    with Matchers
-    with TryValues
-    with EitherValues {
+  extends FlatSpec
+  with Matchers
+  with TryValues
+  with EitherValues {
   import DynamiteConfigSpec._
 
   "config" should "load default values for empty file" in {

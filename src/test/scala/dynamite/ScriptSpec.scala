@@ -16,10 +16,10 @@ import org.scalamock.scalatest.MockFactory
 import scala.collection.JavaConverters._
 
 class ScriptSpec
-    extends FlatSpec
-    with Matchers
-    with MockFactory
-    with EitherValues {
+  extends FlatSpec
+  with Matchers
+  with MockFactory
+  with EitherValues {
 
   def captureStdOut[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()

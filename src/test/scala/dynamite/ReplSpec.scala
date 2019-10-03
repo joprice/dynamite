@@ -18,10 +18,10 @@ import scala.util.{ Failure, Success, Try }
 import org.scalamock.scalatest.MockFactory
 
 class ReplSpec
-    extends FlatSpec
-    with Matchers
-    with MockFactory
-    with EitherValues {
+  extends FlatSpec
+  with Matchers
+  with MockFactory
+  with EitherValues {
 
   def withReader[A](query: String)(f: Reader => A) = {
     val reader = new TestReader(query)

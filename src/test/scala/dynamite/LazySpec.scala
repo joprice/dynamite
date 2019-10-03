@@ -3,9 +3,9 @@ package dynamite
 import org.scalatest._
 
 class LazySpec
-    extends FlatSpec
-    with Matchers
-    with EitherValues {
+  extends FlatSpec
+  with Matchers
+  with EitherValues {
 
   "lazy" should "not eval its argument until accessed" in {
     var test = false

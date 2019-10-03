@@ -19,9 +19,9 @@ trait DynamoTestClient {
 }
 
 trait DynamoSpec
-    extends BeforeAndAfterAll
-    with BeforeAndAfterEach
-    with DynamoTestClient { self: Suite =>
+  extends BeforeAndAfterAll
+  with BeforeAndAfterEach
+  with DynamoTestClient { self: Suite =>
 
   def tableNames: Seq[String]
 
