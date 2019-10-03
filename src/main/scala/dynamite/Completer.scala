@@ -52,8 +52,8 @@ object Completer {
   }
 
   class FieldsCompleter(
-      reader: ConsoleReader,
-      tableCache: TableCache
+    reader: ConsoleReader,
+    tableCache: TableCache
   ) extends Completer {
     def keyNames(reader: ConsoleReader) = {
       tableParser.parse(reader.getCursorBuffer.buffer.toString) match {

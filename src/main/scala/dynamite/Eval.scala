@@ -230,7 +230,7 @@ object Eval {
   }
 
   class TimedRecoveringIterator[A](
-      original: Iterator[A]
+    original: Iterator[A]
   ) extends Iterator[Timed[Try[A]]] {
     private[this] val recovering = new RecoveringIterator[A](original)
 
@@ -243,8 +243,8 @@ object Eval {
   }
 
   class TableIterator[A](
-      select: Select,
-      original: Iterator[Iterator[JsonNode]]
+    select: Select,
+    original: Iterator[Iterator[JsonNode]]
   ) extends Iterator[Timed[Try[List[JsonNode]]]] {
     private[this] val recovering = new RecoveringIterator(original)
 

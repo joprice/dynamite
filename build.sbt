@@ -1,3 +1,4 @@
+import scalariform.formatter.preferences._
 import sbtrelease.ReleaseStateTransformations._
 import ohnosequences.sbt.GithubRelease
 import org.kohsuke.github.GHRelease
@@ -41,13 +42,11 @@ testQuick in Test := (testQuick in Test).dependsOn(startDynamoDBLocal).evaluated
 
 dynamoDBLocalPort := new java.net.ServerSocket(0).getLocalPort
 
-testOptions in Test += Tests.Setup(() => 
+testOptions in Test += Tests.Setup(() =>
   System.setProperty("dynamodb.local.port", dynamoDBLocalPort.value.toString)
 )
 
 dynamoDBLocalDownloadDir := baseDirectory.value / "dynamodb-local"
-
-SbtScalariform.scalariformSettings 
 
 ghreleaseRepoOrg := "joprice"
 ghreleaseRepoName := "dynamite"
@@ -58,11 +57,11 @@ ghreleaseAssets := Seq((packageBin in Universal).value)
 
 scalacOptions in (Compile, compile) ++= Seq(
   "-encoding", "UTF-8",
-  "-deprecation", 
-  "-feature", 
-  "-unchecked", 
-  "-Xlint", 
-  "-Ywarn-adapted-args", 
+  "-deprecation",
+  "-feature",
+  "-unchecked",
+  "-Xlint",
+  "-Ywarn-adapted-args",
   "-Ywarn-inaccessible",
   "-Ywarn-dead-code",
   "-Xfatal-warnings"
@@ -89,7 +88,6 @@ releaseOnGithub := Def.taskDyn {
 
 releaseProcess := Seq[ReleaseStep](
   releaseStepTask(checkVersionNotes),
-  releaseStepTask(ghreleaseGetCredentials),
   checkSnapshotDependencies,
   inquireVersions,
   runClean,
@@ -105,4 +103,5 @@ releaseProcess := Seq[ReleaseStep](
   pushChanges
 )
 
-
+scalariformPreferences := scalariformPreferences.value
+  .setPreference(DanglingCloseParenthesis, Force)
