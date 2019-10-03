@@ -376,13 +376,31 @@ class ParserSpec extends FlatSpec with Matchers with EitherValues {
     validate("format tabular", SetFormat(Ast.Format.Tabular))
   }
 
-  it should "support boolean values" in {
-    parse(
-      """insert into playlists (userId, id, curated) values ("user-1", "id-1", true)"""
+  it should "support true" in {
+    validate(
+      """insert into playlists (userId, id, curated) values ("user-1", "id-1", true)""",
+      Insert(
+        "playlists",
+        Seq(
+          "userId" -> StringValue("user-1"),
+          "id" -> StringValue("id-1"),
+          "curated" -> BoolValue(true)
+        )
+      )
     )
-    parse(
-      """insert into playlists (userId, id, curated) values ("user-1", "id-1", false)"""
+  }
+
+  it should "support false" in {
+    validate(
+      """insert into playlists (userId, id, curated) values ("user-1", "id-1", false)""",
+      Insert(
+        "playlists",
+        Seq(
+          "userId" -> StringValue("user-1"),
+          "id" -> StringValue("id-1"),
+          "curated" -> BoolValue(false)
+        )
+      )
     )
   }
 }
-
