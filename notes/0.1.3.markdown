@@ -1,0 +1,3 @@
+* support booleans
+* add `order by`
+* add `--profile` argument to set AWS profile
