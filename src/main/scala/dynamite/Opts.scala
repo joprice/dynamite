@@ -8,7 +8,8 @@ final case class Opts(
   endpoint: Option[String] = None,
   format: Format = Format.Tabular,
   script: Option[String] = None,
-  configFile: Option[File] = None
+  configFile: Option[File] = None,
+  profile: Option[String] = None
 )
 
 object Opts {
@@ -27,6 +28,10 @@ object Opts {
     opt[String]("endpoint").action { (endpoint, config) =>
       config.copy(endpoint = Some(endpoint))
     }.text("aws endpoint")
+
+    opt[String]("profile").action { (profile, config) =>
+      config.copy(profile = Some(profile))
+    }.text("AWS IAM profile")
 
     opt[Format]("format").action { (render, config) =>
       config.copy(format = render)
