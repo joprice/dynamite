@@ -105,6 +105,3 @@ releaseProcess := Seq[ReleaseStep](
 
 scalariformPreferences := scalariformPreferences.value
   .setPreference(DanglingCloseParenthesis, Force)
-
-tutSettings
-
