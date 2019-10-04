@@ -2,7 +2,23 @@ import sbtrelease.ReleaseStateTransformations._
 import ohnosequences.sbt.GithubRelease
 import org.kohsuke.github.GHRelease
 
-enablePlugins(JavaAppPackaging, BuildInfoPlugin)
+enablePlugins(BuildInfoPlugin, GraalVMNativeImagePlugin)
+
+graalVMNativeImageOptions ++= Seq(
+  "--enable-url-protocols=http,https",
+  "--no-fallback",
+  "--no-server",
+  "--initialize-at-build-time",
+  "-H:IncludeResourceBundles=jline.console.completer.CandidateListCompletionHandler",
+  //TODO: copy to target somehow?
+  //"-H:ReflectionConfigurationFiles=/opt/graalvm/stage/resources/reflection.json"
+  "-H:ReflectionConfigurationFiles=../../src/graal/reflection.json",
+  "-H:+MultiThreaded",
+  "--verbose",
+  "--enable-all-security-services"
+)
+
+//graalVMNativeImageGraalVersion := Some("19.2.0.1")
 
 buildInfoPackage := "dynamite"
 
@@ -110,7 +126,10 @@ ghreleaseRepoName := "dynamite"
 
 //GithubRelease.draft := true
 
-ghreleaseAssets := Seq((packageBin in Universal).value)
+ghreleaseAssets := Seq(
+  (packageBin in Universal).value,
+  (packageBin in GraalVMNativeImage).value
+)
 
 scalacOptions in (Compile, compile) ++= Seq(
   "-encoding",
