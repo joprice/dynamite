@@ -5,7 +5,7 @@ import java.util.stream.Collectors
 object Dynamite {
 
   def main(args: Array[String]): Unit = {
-    Opts.parse(args) match {
+    Opts.parse(args.toIndexedSeq) match {
       case Some(config) =>
         config.script match {
           case Some(script) => Script(config, script)

@@ -6,16 +6,10 @@ import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import org.scalatest._
 import scala.concurrent.duration._
 import com.amazonaws.auth.{ BasicAWSCredentials, AWSStaticCredentialsProvider }
+import com.amazonaws.services.dynamodbv2.local.embedded.DynamoDBEmbedded
 
 trait DynamoTestClient {
-  val dynamoPortKey = "dynamodb.local.port"
-
-  val dynamoPort = sys.props.get(dynamoPortKey).getOrElse {
-    throw new Exception(s"Failed to find $dynamoPortKey")
-  }
-
-  val credentials = new AWSStaticCredentialsProvider(new BasicAWSCredentials("", ""))
-  lazy val client = Repl.dynamoClient(Some(s"http://127.0.0.1:$dynamoPort"), Some(credentials))
+  lazy val client = DynamoDBEmbedded.create().amazonDynamoDB()
 }
 
 trait DynamoSpec

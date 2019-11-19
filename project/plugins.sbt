@@ -4,7 +4,6 @@ resolvers ++= Seq(
   "Era7 maven releases" at "https://s3-eu-west-1.amazonaws.com/releases.era7.com"
 )
 
-addSbtPlugin("com.localytics" % "sbt-dynamodb" % "2.0.3")
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.10")
 addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.5.0")
 addSbtPlugin("org.scalariform" % "sbt-scalariform" % "1.8.3")

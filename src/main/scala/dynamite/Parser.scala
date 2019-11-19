@@ -1,74 +1,72 @@
 package dynamite
 
-import fastparse.all._
+import fastparse._, NoWhitespace._
 import Ast._
 import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 
 //TODO: case insensitive keyword
 object Parser {
 
-  def keyword(value: String) = IgnoreCase(value)
+  def keyword[_: P](value: String) = P(IgnoreCase(value))
 
-  def opt[A](p: Parser[A]): Parser[Option[A]] = (spaces ~ p).?
+  def opt[A, _: P](p: => P[A]): P[Option[A]] = (spaces ~ p).?
 
-  def commaSeparated[A](parser: Parser[A]) =
+  def commaSeparated[A, _: P](parser: => P[A]) =
     parser.rep(1, sep = space.rep ~ "," ~/ space.rep)
 
-  val space = P(" " | "\n")
+  def space[_: P] = P(" " | "\n")
 
-  val spaces = P(space.rep(1))
+  def spaces[_: P] = P(space.rep(1))
 
   //TODO: use .opaque for this
-  val character = P(CharIn('a' to 'z', 'A' to 'Z', '0' to '9', Seq('-', '_')))
+  def character[_: P] = P(CharIn("a-z", "A-Z", "0-9") | "-" | "_")
 
   //TODO: support hyphens in fields?
-  val ident = P(character.rep(1).!)
+  def ident[_: P] = P(character.rep(1).!)
 
-  def str(delim: Char) =
+  def str[_: P](delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
 
-  def setField[A](value: Parser[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
+  def setField[A, _: P](value: => P[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
-  val string = P(str('"') | str('\''))
+  def string[_: P] = P(str('"') | str('\''))
 
-  val integer = P("-".? ~ {
-    val num = P(CharIn('0' to '9'))
-    val nonZeroNum = P(CharIn('1' to '9'))
-    P(nonZeroNum ~ num.rep | "0").!
-  }).!
+  def digits[_: P] = P(CharsWhileIn("0-9"))
 
-  val float = P("-".? ~ integer.? ~ "." ~ integer).!
-  val boolValue: Parser[BoolValue] = P(
+  def integer[_: P] = P("-".? ~ ("0" | CharIn("1-9") ~ digits.?)).!
+
+  def float[_: P] = P("-".? ~ integer.? ~ "." ~ integer).!
+  def boolValue[_: P]: P[BoolValue] = P(
     P("true").map(_ => BoolValue(true)) |
       P("false").map(_ => BoolValue(false))
   )
-  val stringValue = P(string.map(StringValue))
-  val floatValue = P(float.map(FloatValue))
-  val integerValue = P(integer.map(IntValue))
-  val numberValue = P(floatValue | integerValue)
+  def stringValue[_: P] = P(string.map(StringValue))
+  def floatValue[_: P] = P(float.map(FloatValue))
+  def integerValue[_: P] = P(integer.map(IntValue))
+  def numberValue[_: P] = P(floatValue | integerValue)
 
   // keys support strings, number, and binary (TODO: support 'binary' input?)
-  val keyValue: Parser[KeyValue] = P(stringValue | numberValue)
+  def keyValue[_: P]: P[KeyValue] = P(stringValue | numberValue)
 
   //TODO: distinguish set/list in some operations?
-  val listValue: Parser[ListValue] = P(
+  def listValue[_: P]: P[ListValue] = P(
     "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
   ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
-  val objectValue: Parser[ObjectValue] = P(
+  def objectValue[_: P]: P[ObjectValue] = P(
     "{" ~/ space.rep ~ commaSeparated(
       string ~ space.rep ~ ":" ~ space.rep ~ value
     ) ~ space.rep ~ "}"
   ).map(values => ObjectValue(values))
 
-  val value = P(keyValue | listValue | objectValue | boolValue)
+  def value[_: P] = P(keyValue | listValue | objectValue | boolValue)
 
   //TODO: fail parse on invalid numbers?
-  val limit = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
+  def limit[_: P] = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
 
-  val key = P(setField(keyValue).map(Key.tupled))
+  def key[_: P] = P(setField(keyValue).map(Key.tupled))
 
-  val primaryKey = P(
+  def primaryKey[_: P] = P(
     keyword("where") ~/ spaces ~ key
       ~ (spaces ~ keyword("and") ~/ spaces ~ key).?
   ).map {
@@ -76,25 +74,25 @@ object Parser {
         PrimaryKey(hash, sortKey)
     }
 
-  val direction: Parser[Direction] = P(
+  def direction[_: P]: P[Direction] = P(
     P(keyword("asc")).map(_ => Ascending) |
       P(keyword("desc")).map(_ => Descending)
   )
 
-  val orderBy = P(
+  def orderBy[_: P] = P(
     (keyword("order") ~/ spaces ~ keyword("by") ~ spaces ~ ident) ~ opt(direction)
   ).map {
       case (field, direction) =>
         OrderBy(field, direction)
     }
 
-  val from = P(keyword("from") ~ spaces ~ ident)
+  def from[_: P] = P(keyword("from") ~ spaces ~ ident)
 
-  val field = P(ident).map(FieldSelector.Field)
+  def field[_: P] = P(ident).map(FieldSelector.Field)
 
-  val aggregateFunction = StringInIgnoreCase("count").!.map(_.toLowerCase)
+  def aggregateFunction[_: P] = StringInIgnoreCase("count").!.map(_.toLowerCase)
 
-  val aggregate: Parser[Aggregate] = P(
+  def aggregate[_: P]: P[Aggregate] = P(
     aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
   ).flatMap {
       case ("count", _) => Pass.map(_ => Aggregate.Count)
@@ -103,24 +101,24 @@ object Parser {
         Fail.opaque("aggregate function")
     }
 
-  val allFields = P("*".!.map(_ => FieldSelector.All))
+  def allFields[_: P] = P("*".!.map(_ => FieldSelector.All))
 
-  val fieldSelector: Parser[FieldSelector] = P(
+  def fieldSelector[_: P]: P[FieldSelector] = P(
     allFields | field
   )
 
-  val projection: Parser[Projection] = P(
+  def projection[_: P]: P[Projection] = P(
     // TODO: support select sum(field), a, etc.
     aggregate | fieldSelector
   )
 
-  val projections: Parser[Seq[Projection]] = P(
+  def projections[_: P]: P[Seq[Projection]] = P(
     commaSeparated(projection)
   )
 
-  val useIndex = keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
+  def useIndex[_: P] = keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
 
-  val select = P(
+  def select[_: P] = P(
     keyword("select") ~/ spaces ~
       projections ~ spaces ~
       from ~
@@ -130,17 +128,17 @@ object Parser {
       opt(useIndex)
   ).map(Select.tupled)
 
-  val update = P(
+  def update[_: P] = P(
     keyword("update") ~/ spaces ~ ident ~ spaces ~
       keyword("set") ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
       primaryKey
   )
     .map(Update.tupled)
 
-  val delete = P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
+  def delete[_: P] = P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
     .map(Delete.tupled)
 
-  val insert = P(
+  def insert[_: P] = P(
     keyword("insert") ~/ spaces ~
       keyword("into") ~ spaces ~ ident ~ spaces ~
       // it would be nice to have column names be optional, but there is no
@@ -154,21 +152,21 @@ object Parser {
         Insert(table, pairs)
     }
 
-  val describeTable = P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident).map(DescribeTable)
+  def describeTable[_: P] = P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident).map(DescribeTable)
 
-  val showTables = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
+  def showTables[_: P] = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
-  val format: Parser[Ast.Format] = P(
+  def format[_: P]: P[Ast.Format] = P(
     keyword("tabular").map(_ => Ast.Format.Tabular) |
       keyword("json").map(_ => Ast.Format.Json)
   )
 
-  val setFormat = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
+  def setFormat[_: P] = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
 
-  val showFormat = P(keyword("show") ~ spaces ~ keyword("format"))
+  def showFormat[_: P] = P(keyword("show") ~ spaces ~ keyword("format"))
     .map(_ => ShowFormat)
 
-  val query = P(spaces.? ~ (
+  def query[_: P]: P[Command] = P(spaces.? ~ (
     update | select | delete | insert | showTables | describeTable | setFormat | showFormat
   ) ~ spaces.? ~ End)
 
@@ -177,7 +175,8 @@ object Parser {
 
   object ParseException {
     final case class ParseError(failure: Parsed.Failure) extends ParseException(
-      "Failed parsing query", Some(fastparse.core.ParseError(failure))
+      // see notes on errors http://www.lihaoyi.com/fastparse/#Failures
+      "Failed parsing query", Some(new Exception(s"${failure.index} ${failure.msg}"))
     )
     final case class UnAggregatedFieldsError(fields: Seq[String]) extends ParseException(
       "Aggregates may not be used with unaggregated fields", None
@@ -199,11 +198,10 @@ object Parser {
 
   def parse(input: String): Either[ParseException, Command] = {
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
-    import fastparse.core.Parsed.{ Failure, Success }
-    query.parse(input) match {
-      case Success(select: Select, _) => validate(select)
-      case Success(value, _) => Right(value)
-      case failure: Failure[_, _] => Left(ParseException.ParseError(failure))
+    fastparse.parse(input, query(_)) match {
+      case Parsed.Success(select: Select, _) => validate(select)
+      case Parsed.Success(value, _) => Right(value)
+      case failure: Parsed.Failure => Left(ParseException.ParseError(failure))
     }
   }
 }

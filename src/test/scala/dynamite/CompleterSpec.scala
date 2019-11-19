@@ -14,8 +14,8 @@ class CompleterSpec
   with OptionValues {
 
   "table parser" should "parse a projection" in {
-    Completer.tableParser.parse("select * from tableName") should matchPattern {
-      case fastparse.core.Parsed.Success("tableName", _) =>
+    fastparse.parse("select * from tableName", Completer.tableParser(_)) should matchPattern {
+      case fastparse.Parsed.Success("tableName", _) =>
     }
   }
 
@@ -37,4 +37,3 @@ class CompleterSpec
   }
 
 }
-

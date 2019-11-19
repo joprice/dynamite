@@ -3,7 +3,7 @@ package dynamite
 import java.io._
 import java.nio.charset.StandardCharsets
 
-class TestReader(line: String) extends Reader {
+class TestReader(line: String) extends dynamite.Reader {
   private[this] val in = new BufferedReader(
     new InputStreamReader(
       new ByteArrayInputStream(line.getBytes(StandardCharsets.UTF_8))

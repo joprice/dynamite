@@ -5,10 +5,9 @@ import dynamite.Response.TableNames
 import jline.console.ConsoleReader
 import jline.console.completer._
 import Parser._
-import fastparse.all._
+import fastparse._, NoWhitespace._
 import scala.util.Try
-import scala.collection.JavaConverters._
-import fastparse.core.Parsed.Success
+import scala.jdk.CollectionConverters._
 
 object Completer {
   def literal(values: String*) = new StringsCompleter(values: _*)
@@ -47,7 +46,7 @@ object Completer {
     }
   }
 
-  val tableParser = ((keyword("select") ~/ spaces ~ projections ~ spaces) ~ from).map {
+  def tableParser[_: P] = ((keyword("select") ~/ spaces ~ projections ~ spaces) ~ from).map {
     case (_, table) => table
   }
 
@@ -56,8 +55,8 @@ object Completer {
     tableCache: TableCache
   ) extends Completer {
     def keyNames(reader: ConsoleReader) = {
-      tableParser.parse(reader.getCursorBuffer.buffer.toString) match {
-        case Success(name, _) => Some(name)
+      fastparse.parse(reader.getCursorBuffer.buffer.toString, tableParser(_)) match {
+        case Parsed.Success(name, _) => Some(name)
         case _ => None
       }
     }.fold(Seq.empty[String]) { name =>
@@ -137,4 +136,3 @@ object Completer {
     )
   }
 }
-

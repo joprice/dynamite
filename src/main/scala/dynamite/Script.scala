@@ -4,7 +4,7 @@ import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.document.DynamoDB
 import com.fasterxml.jackson.databind.JsonNode
-import dynamite.Ast._
+import dynamite.Ast.{ Format => _, _ }
 import jline.internal.Ansi
 import scala.util.{ Failure, Success, Try }
 

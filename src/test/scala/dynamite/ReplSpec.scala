@@ -1,7 +1,6 @@
 package dynamite
 
 import java.io._
-
 import com.amazonaws.jmespath.ObjectMapperSingleton
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
 import com.amazonaws.util.json.Jackson
@@ -23,7 +22,7 @@ class ReplSpec
   with MockFactory
   with EitherValues {
 
-  def withReader[A](query: String)(f: Reader => A) = {
+  def withReader[A](query: String)(f: dynamite.Reader => A) = {
     val reader = new TestReader(query)
     try f(reader) finally {
       reader.close()
