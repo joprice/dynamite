@@ -29,7 +29,7 @@ trait Reader {
 }
 
 class JLineReader(reader: ConsoleReader) extends Reader {
-  def disableEcho(): Unit = reader.setEchoCharacter(new Character(0))
+  def disableEcho(): Unit = reader.setEchoCharacter(Character.valueOf(0))
 
   def enableEcho(): Unit = reader.setEchoCharacter(null)
 
