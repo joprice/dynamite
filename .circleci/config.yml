@@ -3,7 +3,8 @@ jobs:
   build:
     #working_directory: ~/samplescala
     docker:
-      - image: hseeberger/scala-sbt:8u242_1.3.10_2.13.1
+      - image: hseeberger/scala-sbt:11.0.6_1.3.10_2.13.1
+
     environment:
       SBT_VERSION: 1.3.10
       SBT_OPTS: "-Xmx1G -XX:MaxMetaspaceSize=384M -XX:+UseCompressedOops"
