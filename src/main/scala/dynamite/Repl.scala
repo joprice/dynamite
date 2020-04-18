@@ -11,13 +11,12 @@ import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
 import scala.concurrent.duration._
-import scala.collection.JavaConverters._
 import scala.annotation.tailrec
+import scala.jdk.CollectionConverters._
 import dynamite.Ast._
 import dynamite.Parser.ParseException
 import dynamite.Response.KeySchema
 import fansi._
-import scala.collection.breakOut
 import scala.util.{ Failure, Success, Try }
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.auth.AWSCredentialsProvider
@@ -365,9 +364,9 @@ object Repl {
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
     val body = list.map { item =>
-      val data: Map[String, Any] = item.fields().asScala.toList.map { entry =>
+      val data: Map[String, Any] = item.fields().asScala.map { entry =>
         (entry.getKey, entry.getValue)
-      }(breakOut)
+      }.toMap
       // missing fields are represented by an empty str
       headers.map {
         header =>

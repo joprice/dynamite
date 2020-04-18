@@ -21,7 +21,7 @@ import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
 import dynamite.Response._
 
 import scala.concurrent.duration._
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try }
 
 object Eval {
@@ -129,11 +129,10 @@ object Eval {
     case StringValue(value) => value
     case number: NumberValue => number.value
     case ObjectValue(values) =>
-      import scala.collection.breakOut
       val map: Map[String, AnyRef] = values.map {
         case (key, value) =>
           key -> unwrap(value)
-      }(breakOut)
+      }.toMap
       map.asJava
     case ListValue(value) => value.map(unwrap).asJava
   }
@@ -302,9 +301,10 @@ object Eval {
     }).getOrElse(Seq.empty)
 
     val schemas = (globalIndexes ++ localIndexes)
-      .flatMap { case (name, keys) => indexSchema(name, keys) }
+      .flatMap { case (name, keys) => indexSchema(name, keys.toVector) }
+      .toVector
 
-    val elements = description.getKeySchema.asScala
+    val elements = description.getKeySchema.asScala.toVector
     val key = keySchema(elements, KeyType.HASH)
     val range = keySchema(elements, KeyType.RANGE)
 
@@ -376,10 +376,9 @@ object Eval {
     val table = dynamo.getTable(query.from)
 
     def wrap[A](results: ItemCollection[A]) = {
-      import scala.collection.breakOut
       val it = results.pages.iterator()
       val original: Iterator[Iterator[JsonNode]] = it.asScala.map {
-        _.asScala.map(Eval.jsonNode)(breakOut)
+        _.asScala.map(Eval.jsonNode).iterator
       }
       ResultSet(
         new TableIterator(query, original),

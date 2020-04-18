@@ -7,7 +7,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.12.10"
+scalaVersion := "2.13.1"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -20,8 +20,42 @@ addCommandAlias("validate", Seq(
 
 val awsVersion = "1.11.677"
 
+fork := true
+
+lazy val copyJars = taskKey[Unit]("copyJars")
+
+javaOptions in Test ++= Seq(
+  "-Dsqlite4java.library.path=native-libs"
+)
+
+copyJars := {
+  // See http://softwarebyjosh.com/2018/03/25/how-to-unit-test-your-dynamodb-queries.html
+  import java.nio.file.Files
+  import java.io.File
+  val artifactTypes = Set("dylib", "so", "dll")
+  val files = Classpaths.managedJars(Test, artifactTypes, update.value).files
+  val nativeLibs = new File(baseDirectory.value, "native-libs")
+  Files.createDirectories(nativeLibs.toPath)
+  files.foreach { f =>
+    val fileToCopy = new File(nativeLibs, f.name)
+    if (!fileToCopy.exists()) {
+      println(s"Copying $f to $fileToCopy")
+      Files.copy(f.toPath, fileToCopy.toPath)
+    }
+  }
+}
+
+(compile in Compile) := (compile in Compile).dependsOn(copyJars).value
+
+resolvers ++= Seq(
+  "dynamodb-local-oregon" at "https://s3-us-west-2.amazonaws.com/dynamodb-local/release"
+)
+
+// for DynamoDBLocal
+classpathTypes ++= Set("dylib", "so")
+
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "fastparse" % "0.4.4",
+  "com.lihaoyi" %% "fastparse" % "2.2.4",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % awsVersion,
   "com.amazonaws" % "aws-java-sdk-sts" % awsVersion,
   "jline" % "jline" % "2.14.6",
@@ -32,24 +66,12 @@ libraryDependencies ++= Seq(
   "com.iheart" %% "ficus" % "1.4.7",
   "com.typesafe.play" %% "play-json" % "2.7.4" % Test,
   "org.scalatest" %% "scalatest" % "3.0.8" % Test,
-  "org.scalamock" %% "scalamock-scalatest-support" % "3.6.0" % Test
+  "org.scalamock" %% "scalamock" % "4.4.0" % Test,
+  "com.amazonaws" % "DynamoDBLocal" % "1.12.0" % Test,
+  "com.almworks.sqlite4java" % "sqlite4java" % "1.0.392" % Test,
+  "com.almworks.sqlite4java" % "libsqlite4java-osx" % "1.0.392" % Test artifacts(Artifact("libsqlite4java-osx", "dylib", "dylib")),
+  "com.almworks.sqlite4java" % "libsqlite4java-linux-amd64" % "1.0.392" % Test artifacts(Artifact("libsqlite4java-linux-amd64", "so", "so"))
 )
-
-dynamoDBLocalVersion := "2016-05-17"
-
-startDynamoDBLocal := startDynamoDBLocal.dependsOn(compile in Test).value
-test in Test := (test in Test).dependsOn(startDynamoDBLocal).value
-testOptions in Test += dynamoDBLocalTestCleanup.value
-testOnly in Test := (testOnly in Test).dependsOn(startDynamoDBLocal).evaluated
-testQuick in Test := (testQuick in Test).dependsOn(startDynamoDBLocal).evaluated
-
-dynamoDBLocalPort := new java.net.ServerSocket(0).getLocalPort
-
-testOptions in Test += Tests.Setup(() =>
-  System.setProperty("dynamodb.local.port", dynamoDBLocalPort.value.toString)
-)
-
-dynamoDBLocalDownloadDir := baseDirectory.value / "dynamodb-local"
 
 ghreleaseRepoOrg := "joprice"
 ghreleaseRepoName := "dynamite"
@@ -64,8 +86,6 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-feature",
   "-unchecked",
   "-Xlint",
-  "-Ywarn-adapted-args",
-  "-Ywarn-inaccessible",
   "-Ywarn-dead-code",
   "-Xfatal-warnings"
   //"-Ypatmat-exhaust-depth", "off"
