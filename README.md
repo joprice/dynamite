@@ -75,4 +75,7 @@ dynamite --format=json < query.dql
 dynamite --format=json-pretty < query.dql 
 ```
 
+## TODO
 
+* load dynamo client in background on startup
+* order keys before other fields when `select *`

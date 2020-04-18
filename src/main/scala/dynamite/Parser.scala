@@ -2,7 +2,7 @@ package dynamite
 
 import fastparse._, NoWhitespace._
 import Ast._
-import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
+import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 
 //TODO: case insensitive keyword
 object Parser {
@@ -27,7 +27,8 @@ object Parser {
   def str[_: P](delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
 
-  def setField[A, _: P](value: => P[A]) = P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
+  def setField[A, _: P](value: => P[A]) =
+    P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
   def string[_: P] = P(str('"') | str('\''))
 
@@ -49,15 +50,17 @@ object Parser {
   def keyValue[_: P]: P[KeyValue] = P(stringValue | numberValue)
 
   //TODO: distinguish set/list in some operations?
-  def listValue[_: P]: P[ListValue] = P(
-    "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
-  ).map(value => ListValue(value.getOrElse(Seq.empty)))
+  def listValue[_: P]: P[ListValue] =
+    P(
+      "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
+    ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
-  def objectValue[_: P]: P[ObjectValue] = P(
-    "{" ~/ space.rep ~ commaSeparated(
-      string ~ space.rep ~ ":" ~ space.rep ~ value
-    ) ~ space.rep ~ "}"
-  ).map(values => ObjectValue(values))
+  def objectValue[_: P]: P[ObjectValue] =
+    P(
+      "{" ~/ space.rep ~ commaSeparated(
+        string ~ space.rep ~ ":" ~ space.rep ~ value
+      ) ~ space.rep ~ "}"
+    ).map(values => ObjectValue(values))
 
   def value[_: P] = P(keyValue | listValue | objectValue | boolValue)
 
@@ -66,10 +69,11 @@ object Parser {
 
   def key[_: P] = P(setField(keyValue).map(Key.tupled))
 
-  def primaryKey[_: P] = P(
-    keyword("where") ~/ spaces ~ key
-      ~ (spaces ~ keyword("and") ~/ spaces ~ key).?
-  ).map {
+  def primaryKey[_: P] =
+    P(
+      keyword("where") ~/ spaces ~ key
+        ~ (spaces ~ keyword("and") ~/ spaces ~ key).?
+    ).map {
       case (hash, sortKey) =>
         PrimaryKey(hash, sortKey)
     }
@@ -79,9 +83,12 @@ object Parser {
       P(keyword("desc")).map(_ => Descending)
   )
 
-  def orderBy[_: P] = P(
-    (keyword("order") ~/ spaces ~ keyword("by") ~ spaces ~ ident) ~ opt(direction)
-  ).map {
+  def orderBy[_: P] =
+    P(
+      (keyword("order") ~/ spaces ~ keyword("by") ~ spaces ~ ident) ~ opt(
+        direction
+      )
+    ).map {
       case (field, direction) =>
         OrderBy(field, direction)
     }
@@ -92,11 +99,12 @@ object Parser {
 
   def aggregateFunction[_: P] = StringInIgnoreCase("count").!.map(_.toLowerCase)
 
-  def aggregate[_: P]: P[Aggregate] = P(
-    aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
-  ).flatMap {
+  def aggregate[_: P]: P[Aggregate] =
+    P(
+      aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
+    ).flatMap {
       case ("count", _) => Pass.map(_ => Aggregate.Count)
-      case (other, _) =>
+      case _            =>
         //TODO: custom exception with all valid aggregates?
         Fail.opaque("aggregate function")
     }
@@ -116,45 +124,52 @@ object Parser {
     commaSeparated(projection)
   )
 
-  def useIndex[_: P] = keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
+  def useIndex[_: P] =
+    keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
 
-  def select[_: P] = P(
-    keyword("select") ~/ spaces ~
-      projections ~ spaces ~
-      from ~
-      opt(primaryKey) ~
-      opt(orderBy) ~
-      opt(limit) ~
-      opt(useIndex)
-  ).map(Select.tupled)
+  def select[_: P] =
+    P(
+      keyword("select") ~/ spaces ~
+        projections ~ spaces ~
+        from ~
+        opt(primaryKey) ~
+        opt(orderBy) ~
+        opt(limit) ~
+        opt(useIndex)
+    ).map(Select.tupled)
 
-  def update[_: P] = P(
-    keyword("update") ~/ spaces ~ ident ~ spaces ~
-      keyword("set") ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
-      primaryKey
-  )
-    .map(Update.tupled)
+  def update[_: P] =
+    P(
+      keyword("update") ~/ spaces ~ ident ~ spaces ~
+        keyword("set") ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
+        primaryKey
+    ).map(Update.tupled)
 
-  def delete[_: P] = P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
-    .map(Delete.tupled)
+  def delete[_: P] =
+    P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
+      .map(Delete.tupled)
 
-  def insert[_: P] = P(
-    keyword("insert") ~/ spaces ~
-      keyword("into") ~ spaces ~ ident ~ spaces ~
-      // it would be nice to have column names be optional, but there is no
-      // stable order of a dynamo schema. Some convention could be introduced, but it
-      // might surprising. Optional feature?
-      "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
-      keyword("values") ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
-  ).map {
+  def insert[_: P] =
+    P(
+      keyword("insert") ~/ spaces ~
+        keyword("into") ~ spaces ~ ident ~ spaces ~
+        // it would be nice to have column names be optional, but there is no
+        // stable order of a dynamo schema. Some convention could be introduced, but it
+        // might surprising. Optional feature?
+        "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
+        keyword("values") ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
+    ).map {
       case (table, keys, values) =>
         val pairs = keys.zip(values)
         Insert(table, pairs)
     }
 
-  def describeTable[_: P] = P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident).map(DescribeTable)
+  def describeTable[_: P] =
+    P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident)
+      .map(DescribeTable)
 
-  def showTables[_: P] = P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
+  def showTables[_: P] =
+    P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
   def format[_: P]: P[Ast.Format] = P(
     keyword("tabular").map(_ => Ast.Format.Tabular) |
@@ -163,31 +178,45 @@ object Parser {
 
   def setFormat[_: P] = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
 
-  def showFormat[_: P] = P(keyword("show") ~ spaces ~ keyword("format"))
-    .map(_ => ShowFormat)
+  def showFormat[_: P] =
+    P(keyword("show") ~ spaces ~ keyword("format"))
+      .map(_ => ShowFormat)
 
-  def query[_: P]: P[Command] = P(spaces.? ~ (
-    update | select | delete | insert | showTables | describeTable | setFormat | showFormat
-  ) ~ spaces.? ~ End)
+  def query[_: P]: P[Command] =
+    P(
+      spaces.? ~ (
+        update | select | delete | insert | showTables | describeTable | setFormat | showFormat
+      ) ~ spaces.? ~ End
+    )
 
-  sealed abstract class ParseException(message: String, cause: Option[Throwable])
-    extends Exception(message, cause.orNull)
+  sealed abstract class ParseException(
+      message: String,
+      cause: Option[Throwable]
+  ) extends Exception(message, cause.orNull)
 
   object ParseException {
-    final case class ParseError(failure: Parsed.Failure) extends ParseException(
-      // see notes on errors http://www.lihaoyi.com/fastparse/#Failures
-      "Failed parsing query", Some(new Exception(s"${failure.index} ${failure.msg}"))
-    )
-    final case class UnAggregatedFieldsError(fields: Seq[String]) extends ParseException(
-      "Aggregates may not be used with unaggregated fields", None
-    )
+    final case class ParseError(failure: Parsed.Failure)
+        extends ParseException(
+          // see notes on errors http://www.lihaoyi.com/fastparse/#Failures
+          "Failed parsing query",
+          Some(new Exception(s"${failure.index} ${failure.msg}"))
+        )
+    final case class UnAggregatedFieldsError(fields: Seq[String])
+        extends ParseException(
+          "Aggregates may not be used with unaggregated fields",
+          None
+        )
   }
 
   def validate(select: Select): Either[ParseException, Query] = {
-    val (aggs, fields) = select.projection.foldLeft((Seq.empty: Seq[Aggregate], Vector.empty[String])) {
+    val (aggs, fields) = select.projection.foldLeft(
+      (Seq.empty: Seq[Aggregate], Vector.empty[String])
+    ) {
       case (state, FieldSelector.All) => state
-      case ((aggs, fields), FieldSelector.Field(field)) => (aggs, fields :+ field)
-      case ((aggs, fields), count: Aggregate.Count.type) => (aggs :+ count, fields)
+      case ((aggs, fields), FieldSelector.Field(field)) =>
+        (aggs, fields :+ field)
+      case ((aggs, fields), count: Aggregate.Count.type) =>
+        (aggs :+ count, fields)
     }
     if (aggs.nonEmpty && fields.nonEmpty) {
       Left(ParseException.UnAggregatedFieldsError(fields))
@@ -200,8 +229,8 @@ object Parser {
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     fastparse.parse(input, query(_)) match {
       case Parsed.Success(select: Select, _) => validate(select)
-      case Parsed.Success(value, _) => Right(value)
-      case failure: Parsed.Failure => Left(ParseException.ParseError(failure))
+      case Parsed.Success(value, _)          => Right(value)
+      case failure: Parsed.Failure           => Left(ParseException.ParseError(failure))
     }
   }
 }

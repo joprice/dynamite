@@ -1,15 +1,14 @@
 package dynamite
 
 import java.io.File
-
 import scopt.Read
 
 final case class Opts(
-  endpoint: Option[String] = None,
-  format: Format = Format.Tabular,
-  script: Option[String] = None,
-  configFile: Option[File] = None,
-  profile: Option[String] = None
+    endpoint: Option[String] = None,
+    format: Format = Format.Tabular,
+    script: Option[String] = None,
+    configFile: Option[File] = None,
+    profile: Option[String] = None
 )
 
 object Opts {
@@ -21,17 +20,19 @@ object Opts {
     head(appName, s"v${BuildInfo.version}")
     version("version")
 
-    opt[File]("config-file").action { (configFile, config) =>
-      config.copy(configFile = Some(configFile))
-    }.text("Config file location. Default is $HOME/.dynamite/config")
+    opt[File]("config-file")
+      .action { (configFile, config) =>
+        config.copy(configFile = Some(configFile))
+      }
+      .text("Config file location. Default is $HOME/.dynamite/config")
 
-    opt[String]("endpoint").action { (endpoint, config) =>
-      config.copy(endpoint = Some(endpoint))
-    }.text("aws endpoint")
+    opt[String]("endpoint")
+      .action { (endpoint, config) => config.copy(endpoint = Some(endpoint)) }
+      .text("aws endpoint")
 
-    opt[String]("profile").action { (profile, config) =>
-      config.copy(profile = Some(profile))
-    }.text("AWS IAM profile")
+    opt[String]("profile")
+      .action { (profile, config) => config.copy(profile = Some(profile)) }
+      .text("AWS IAM profile")
 
     opt[Format]("format").action { (render, config) =>
       config.copy(format = render)
@@ -44,8 +45,8 @@ object Opts {
 }
 
 /**
- * Rendering format for output in non-interactive
- */
+  * Rendering format for output in non-interactive
+  */
 sealed abstract class Format extends Product with Serializable
 
 object Format {
@@ -54,10 +55,12 @@ object Format {
   case object Tabular extends Format
 
   implicit val read: Read[Format] = scopt.Read.reads {
-    case "tabular" => Tabular
-    case "json" => Json
+    case "tabular"     => Tabular
+    case "json"        => Json
     case "json-pretty" => JsonPretty
-    case value => throw new IllegalArgumentException(s"'$value' is not one of ['json', 'tabular']")
+    case value =>
+      throw new IllegalArgumentException(
+        s"'$value' is not one of ['json', 'tabular']"
+      )
   }
 }
-

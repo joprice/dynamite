@@ -1,14 +1,17 @@
 package dynamite
 
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.amazonaws.services.dynamodbv2.document.{ DynamoDB, Item }
+import com.amazonaws.services.dynamodbv2.document.{DynamoDB, Item}
 import com.amazonaws.services.dynamodbv2.model._
 import com.amazonaws.services.dynamodbv2.util.TableUtils
 import play.api.libs.json.Json
 
 object Seed {
 
-  def createTableWithoutHashKey(tableName: String, client: AmazonDynamoDB): Unit = {
+  def createTableWithoutHashKey(
+      tableName: String,
+      client: AmazonDynamoDB
+  ): Unit = {
     TableUtils.createTableIfNotExists(
       client,
       new CreateTableRequest()
@@ -54,7 +57,9 @@ object Seed {
             .withKeySchema(
               new KeySchemaElement("name", KeyType.HASH)
             )
-            .withProjection(new Projection().withProjectionType(ProjectionType.ALL))
+            .withProjection(
+              new Projection().withProjectionType(ProjectionType.ALL)
+            )
             .withProvisionedThroughput(
               new ProvisionedThroughput()
                 .withReadCapacityUnits(5L)
@@ -68,21 +73,27 @@ object Seed {
               new KeySchemaElement("userId", KeyType.HASH),
               new KeySchemaElement("name", KeyType.RANGE)
             )
-            .withProjection(new Projection().withProjectionType(ProjectionType.ALL)),
+            .withProjection(
+              new Projection().withProjectionType(ProjectionType.ALL)
+            ),
           new LocalSecondaryIndex()
             .withIndexName("playlist-length")
             .withKeySchema(
               new KeySchemaElement("userId", KeyType.HASH),
               new KeySchemaElement("duration", KeyType.RANGE)
             )
-            .withProjection(new Projection().withProjectionType(ProjectionType.ALL)),
+            .withProjection(
+              new Projection().withProjectionType(ProjectionType.ALL)
+            ),
           new LocalSecondaryIndex()
             .withIndexName("playlist-length-keys-only")
             .withKeySchema(
               new KeySchemaElement("userId", KeyType.HASH),
               new KeySchemaElement("duration", KeyType.RANGE)
             )
-            .withProjection(new Projection().withProjectionType(ProjectionType.KEYS_ONLY))
+            .withProjection(
+              new Projection().withProjectionType(ProjectionType.KEYS_ONLY)
+            )
         )
     )
     TableUtils.waitUntilActive(client, tableName)
@@ -131,4 +142,3 @@ object Seed {
   }
 
 }
-

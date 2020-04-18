@@ -1,31 +1,43 @@
 package dynamite
 
-import java.io.{ Closeable, File, PrintWriter, StringWriter }
 import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
 import com.amazonaws.ClientConfiguration
-import com.amazonaws.services.dynamodbv2.document.DynamoDB
-import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDBClientBuilder, AmazonDynamoDB }
-import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
-import com.fasterxml.jackson.databind.JsonNode
-import dynamite.Ast.Projection.{ Aggregate, FieldSelector }
+import com.amazonaws.services.dynamodbv2.model.{
+  AttributeValue,
+  ScalarAttributeType
+}
+import dynamite.Ast.Projection.{Aggregate, FieldSelector}
+import dynamite.Dynamo.DynamoObject
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
+import zio.logging.Logging
+
 import scala.concurrent.duration._
-import scala.annotation.tailrec
-import scala.jdk.CollectionConverters._
 import dynamite.Ast._
 import dynamite.Parser.ParseException
 import dynamite.Response.KeySchema
 import fansi._
-import scala.util.{ Failure, Success, Try }
+
+import scala.util.{Failure, Success, Try}
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.auth.AWSCredentialsProvider
+import zio._
+import zio.console.{Console, putStrLn}
+import zio.config.Config
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsyncClientBuilder
+import java.io.{Closeable, File, PrintWriter, StringWriter}
+
+import scala.jdk.CollectionConverters._
 
 object Repl {
 
   type ResultPage = Paging[Timed[Try[PageType]]]
 
-  def printTableDescription(out: PrintWriter, description: Response.TableDescription): Unit = {
+  def printTableDescription(
+      out: PrintWriter,
+      description: Response.TableDescription
+  ): Unit = {
     def heading(str: String) = Bold.On(Color.LightCyan(Str(str)))
 
     def renderType(tpe: ScalarAttributeType) = tpe match {
@@ -40,41 +52,37 @@ object Repl {
     val headers = Seq("name", "hash", "range")
     val output =
       s"""${heading("schema")}
-         |${
-        Table(
-          headers,
-          Seq(
-            Seq(
-              Str(description.name),
-              renderSchema(description.hash),
-              description.range.fold(Str(""))(renderSchema)
-            )
-          ),
-          None
-        )
-      }
+         |${Table(
+           headers,
+           Seq(
+             Seq(
+               Str(description.name),
+               renderSchema(description.hash),
+               description.range.fold(Str(""))(renderSchema)
+             )
+           ),
+           None
+         )}
          |${heading("indexes")}
-         |${
-        Table(
-          headers,
-          description.indexes.map { index =>
-            Seq(
-              Str(index.name),
-              renderSchema(index.hash),
-              index.range.fold(Str(""))(renderSchema)
-            )
-          },
-          None
-        )
-      }""".stripMargin
+         |${Table(
+           headers,
+           description.indexes.map { index =>
+             Seq(
+               Str(index.name),
+               renderSchema(index.hash),
+               index.range.fold(Str(""))(renderSchema)
+             )
+           },
+           None
+         )}""".stripMargin
 
     out.println(output)
   }
 
   def handlePage[A, B](
-    out: PrintWriter,
-    page: Paging.Page[Timed[Try[A]]],
-    reader: Reader
+      out: PrintWriter,
+      page: Paging.Page[Timed[Try[A]]],
+      reader: Reader
   )(process: A => B): Paging[Timed[Try[A]]] = {
     val Lazy(Timed(value, duration)) = page.data
     value match {
@@ -86,7 +94,7 @@ object Repl {
         val nextPage = page.next()
         nextPage match {
           case Paging.EOF => reader.resetPagination()
-          case _ => out.println("Press q to quit, any key to load next page.")
+          case _          => out.println("Press q to quit, any key to load next page.")
         }
         nextPage
       //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
@@ -101,10 +109,10 @@ object Repl {
   }
 
   def renderPage(
-    out: PrintWriter,
-    reader: Reader,
-    format: Ast.Format,
-    paging: Paging.Page[Timed[Try[PageType]]]
+      out: PrintWriter,
+      reader: Reader,
+      format: Ast.Format,
+      paging: Paging.Page[Timed[Try[PageType]]]
   ): ResultPage = {
     reader.clearPrompt()
     reader.disableEcho()
@@ -116,58 +124,66 @@ object Repl {
           case Ast.Format.Json =>
             //TODO: paginate json output to avoid flooding terminal
             values.foreach { value =>
-              out.println(Script.prettyPrint(value))
+              out.println(Script.printDynamoObject(value, pretty = true))
             }
           case Ast.Format.Tabular =>
-            out.print(render(
-              values,
-              select.projection,
-              width = Some(reader.terminalWidth)
-            ))
+            out.print(
+              render(
+                values,
+                select.projection,
+                width = Some(reader.terminalWidth)
+              )
+            )
         }
       case PageType.TableNamePaging(tableNames) =>
-        out.println(Table(
-          headers = Seq("name"),
-          data = tableNames.map(name => Seq(Str(name))), None
-        ))
+        out.println(
+          Table(
+            headers = Seq("name"),
+            data = tableNames.map(name => Seq(Str(name))),
+            None
+          )
+        )
     }
   }
 
   def paginate(
-    out: PrintWriter,
-    reader: Reader,
-    format: Ast.Format,
-    results: ResultPage
+      out: PrintWriter,
+      reader: Reader,
+      format: Ast.Format,
+      results: ResultPage
   ): Unit = {
-    results match {
-      case Paging.EOF =>
-      case page @ Paging.Page(_, _) =>
-        val paging = renderPage(out, reader, format, page)
-        out.flush()
-        paging match {
-          case Paging.EOF =>
-          case _ =>
-            // While paging, a single char is read so that a new line is not required to
-            // go the next page, or quit the pager
-            val line = reader.readCharacter().toChar.toString
-            if (line != null) {
-              val trimmed = line.trim
-              // q is used to quit pagination
-              if (trimmed != "q") {
-                paginate(out, reader, format, paging)
+    try {
+      results match {
+        case Paging.EOF =>
+        case page @ Paging.Page(_, _) =>
+          val paging = renderPage(out, reader, format, page)
+          out.flush()
+          paging match {
+            case Paging.EOF =>
+            case _          =>
+              // While paging, a single char is read so that a new line is not required to
+              // go the next page, or quit the pager
+              val line = reader.readCharacter().toChar.toString
+              if (line != null) {
+                val trimmed = line.trim
+                // q is used to quit pagination
+                if (trimmed != "q") {
+                  paginate(out, reader, format, paging)
+                }
               }
-            }
-        }
+          }
+      }
+    } finally {
+      reader.resetPagination()
     }
-    reader.resetPagination()
   }
 
   def report(
-    out: PrintWriter,
-    reader: Reader,
-    format: Ast.Format,
-    query: Ast.Command,
-    results: Response
+      out: PrintWriter,
+      reader: Reader,
+      format: Ast.Format,
+      query: Ast.Command,
+      results: Response
   ): Unit = (query, results) match {
     case (select: Ast.Select, Response.ResultSet(resultSet, _)) =>
       // TODO: completion: success/failure, time, result count, indicate empty?
@@ -201,111 +217,129 @@ object Repl {
       printTableDescription(out, description)
     case (_, Response.Info(message)) =>
       out.println(message)
+    case (_: Insert, _) =>
     case unhandled =>
       out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
   }
 
-  @tailrec final def loop(
-    buffer: String,
-    out: PrintWriter,
-    reader: Reader,
-    format: Ast.Format,
-    eval: Ast.Query => Try[Response]
-  ): Unit = {
+  final def loop(
+      buffer: String,
+      out: PrintWriter,
+      reader: Reader,
+      format: Ast.Format,
+      eval: Ast.Query => Task[Response]
+  ): RIO[Logging, Unit] = {
     val line = reader.readLine()
 
     if (line != null) {
       val trimmed = line.trim
-      val (updated, continue, newFormat) = if (trimmed.matches("exit *;?")) {
-        ("", false, format)
-      } else if (trimmed.contains(";")) {
-        reader.resetPrompt()
-        //TODO: switch to either with custom error type for console output
-        val stripped = {
-          val s = trimmed.stripSuffix(";")
-          if (buffer.nonEmpty) s"$buffer\n$s" else s
-        }
-        val newFormat = Parser.parse(stripped)
-          .fold({ failure =>
-            out.println(parseError(stripped, failure))
-            format
-          }, {
-            case ShowFormat =>
-              out.println(format)
-              format
-            case SetFormat(format) =>
-              //Success(Response.Info(s"Format set to $format"))
-              out.println(s"Format set to $format")
-              format
-            case query: Query =>
-              eval(query) match {
-                case Success(results) =>
-                  report(out, reader, format, query, results)
-                case Failure(ex) =>
-                  val msg = Option(ex.getMessage).getOrElse("An unknown error occurred")
-                  out.println(formatError(msg))
+      for {
+        (updated, continue, newFormat) <- if (trimmed.matches("exit *;?")) {
+          Task.succeed(("", false, format))
+        } else if (trimmed.contains(";")) {
+          reader.resetPrompt()
+          //TODO: switch to either with custom error type for console output
+          val stripped = {
+            val s = trimmed.stripSuffix(";")
+            if (buffer.nonEmpty) s"$buffer\n$s" else s
+          }
+          Parser
+            .parse(stripped)
+            .fold(
+              { failure =>
+                out.println(parseError(stripped, failure))
+                ZIO.succeed(format)
+              }, {
+                case ShowFormat =>
+                  out.println(format)
+                  ZIO.succeed(format)
+                case SetFormat(format) =>
+                  //Success(Response.Info(s"Format set to $format"))
+                  out.println(s"Format set to $format")
+                  ZIO.succeed(format)
+                case query: Query =>
+                  eval(query)
+                    .foldM(
+                      { ex =>
+                        val msg = Option(ex.getMessage)
+                          .getOrElse("An unknown error occurred")
+                        out.println(formatError(msg))
+                        Task.unit
+                      //TODO: log throwable when verbose flag?
+                      //log.throwable("Failed running query", ex)
+                      }, { results =>
+                        Task(
+                          report(out, reader, format, query, results)
+                        ).catchAll { error =>
+                          val msg = Option(error.getMessage)
+                            .getOrElse("An unknown error occurred")
+                          out.println(formatError(msg))
+                          Task.unit
+                        }
+                      }
+                    )
+                    .as(format)
               }
-              format
-          })
-        ("", true, newFormat)
-      } else {
-        reader.setPrompt(Bold.On(Str("  -> ")).render)
-        (s"$buffer\n$line", true, format)
-      }
-      out.flush()
-      if (continue) {
-        loop(updated, out, reader, newFormat, eval)
-      }
-    }
-  }
-
-  def loadConfig(opts: Opts) = {
-    opts.configFile
-      .map(DynamiteConfig.parseConfig)
-      .getOrElse {
-        DynamiteConfig.loadConfig(DynamiteConfig.defaultConfigDir)
-      }.recover {
-        case error: Throwable =>
-          System.err.println(s"Failed to load config: ${error.getMessage}")
-          sys.exit(1)
-      }
-  }
-
-  def apply(opts: Opts): Unit = {
-    val config = loadConfig(opts).get
-    val client = new Lazy(dynamoClient(config, opts))
-    apply(client, config)
-  }
-
-  def apply(client: Lazy[AmazonDynamoDB], config: DynamiteConfig): Unit = {
-    println(s"${Opts.appName} v${BuildInfo.version}")
-
-    withCloseable(new ConsoleReader) { reader =>
-      withFileHistory(config.historyFile, reader) {
-        // To increase repl start time, the client is initialize lazily. This save .5 second, which is
-        // instead felt by the user when making the first query
-        val wrapped = client.map(new DynamoDB(_))
-
-        val tableCache = new TableCache(Eval.describeTable(wrapped(), _))
-
-        def run(query: Ast.Query) = Eval(wrapped(), query, config.pageSize, tableCache)
-
-        val jLineReader = new JLineReader(reader)
-        jLineReader.resetPrompt()
-        reader.setExpandEvents(false)
-        reader.addCompleter(Completer(reader, tableCache, Eval.showTables(wrapped())))
-
-        val out = new PrintWriter(reader.getOutput)
-
-        //TODO: load current format state from config and persist on change
-        loop("", out, jLineReader, Ast.Format.Tabular, run)
-
-        if (client.accessed) {
-          client().shutdown()
+            )
+            .map { newFormat => ("", true, newFormat) }
+        } else {
+          reader.setPrompt(Bold.On(Str("  -> ")).render)
+          Task.succeed((s"$buffer\n$line", true, format))
         }
-      }
-    }
+        _ = out.flush()
+        () <- if (continue) {
+          loop(updated, out, reader, newFormat, eval)
+        } else Task.unit
+      } yield ()
+    } else Task.unit
   }
+
+  def apply(
+      opts: Opts
+  ): ZIO[Console with Config[DynamiteConfig] with Logging, Throwable, Unit] =
+    Script.withClient(opts).use { client =>
+      for {
+        config <- ZIO.access[Config[DynamiteConfig]](_.get)
+        // client = new Lazy(dynamoClient(config, opts))
+        result <- run(client, config)
+      } yield result
+    }
+
+  val reader = ZManaged.fromAutoCloseable(ZIO.succeed(new ConsoleReader))
+
+  def history(file: File, reader: ConsoleReader) =
+    ZManaged.makeEffect({
+      val history = new FileHistory(file)
+      reader.setHistory(history)
+      history
+    })(_.flush())
+
+  def run(client: AmazonDynamoDBAsync, config: DynamiteConfig) =
+    reader
+      .flatMap(reader => history(config.historyFile, reader).as(reader))
+      .use { reader =>
+        for {
+          _ <- putStrLn(s"${Opts.appName} v${dynamite.BuildInfo.version}")
+          result <- {
+            val tableCache = new TableCache(Eval.describeTable(client, _))
+
+            def run(query: Ast.Query) =
+              Eval(client, query, config.pageSize, tableCache)
+
+            val jLineReader = new JLineReader(reader)
+            jLineReader.resetPrompt()
+            reader.setExpandEvents(false)
+            reader.addCompleter(
+              Completer(reader, tableCache, Eval.showTables(client))
+            )
+
+            val out = new PrintWriter(reader.getOutput)
+
+            //TODO: load current format state from config and persist on change
+            loop("", out, jLineReader, Ast.Format.Tabular, run)
+          }
+        } yield result
+      }
 
   val ellipsis = "..."
   val maxColumnLength = 40
@@ -316,19 +350,22 @@ object Repl {
     else s
   }
 
-  def headers(select: Seq[Ast.Projection], data: Seq[JsonNode]): Seq[String] = {
+  def headers(
+      select: Seq[Ast.Projection],
+      data: Seq[DynamoObject]
+  ): Seq[String] = {
     select.flatMap {
       case FieldSelector.All =>
-        data.flatMap(_.fieldNames().asScala)
-          .distinct
-          .sorted
-      case FieldSelector.Field(field) => Seq(field)
+        data.flatMap(_.keys).distinct.sorted
+      //data.flatMap(_.fieldNames().asScala).distinct.sorted
+      case FieldSelector.Field(field)  => Seq(field)
       case count: Aggregate.Count.type => Seq(count.name)
     }
   }
 
   def withCloseable[A <: Closeable, B](closeable: A)(f: A => B) = {
-    try f(closeable) finally closeable.close()
+    try f(closeable)
+    finally closeable.close()
   }
 
   def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
@@ -341,52 +378,65 @@ object Repl {
     }
   }
 
-  def withClient[A](opts: Opts)(f: AmazonDynamoDB => A): A = {
-    val config = loadConfig(opts).get
-    val client = dynamoClient(config, opts)
-    try {
-      f(client)
-    } finally {
-      client.shutdown()
-    }
-  }
+  def quoteString(s: String) = s""""$s""""
+
+  def renderAttribute(value: AttributeValue): String =
+    Option(value.getBOOL)
+      .map(_.toString)
+      .orElse(Option(value.getS).map(s => s""""$s""""))
+      .orElse(
+        Option(value.getL)
+          .map { list => list.asScala.map(renderAttribute) }
+          .orElse(
+            Option(value.getSS)
+              .map(_.asScala.map(quoteString))
+              .orElse(Option(value.getNS).map(_.asScala))
+          )
+          .map(_.mkString("[", ",", "]"))
+      )
+      .orElse(Option(value.getNULL).map(_ => "null"))
+      .orElse(Option(value.getM).map { value =>
+        renderRow(value.asScala.toMap)
+          .map {
+            case (key, value) => s""""$key": $value"""
+          }
+          .mkString("{", ", ", "}")
+      })
+      .orElse(Option(value.getN))
+      //TODO: BS - Binary Set
+      // B: binary
+      .getOrElse(throw new Exception(s"Failed to render $value"))
+
+  def renderRow(item: DynamoObject): Map[String, String] =
+    item.view.mapValues(renderAttribute).toMap
 
   //TODO: when projecting all fields, show hash/sort keys first?
   def render(
-    list: Seq[JsonNode],
-    select: Seq[Ast.Projection],
-    withHeaders: Boolean = true,
-    align: Boolean = true,
-    width: Option[Int] = None
+      list: Seq[DynamoObject],
+      select: Seq[Ast.Projection],
+      withHeaders: Boolean = true,
+      align: Boolean = true,
+      width: Option[Int] = None
   ): String = {
     val headers = Repl.headers(select, list)
     //TODO: not all fields need the same names. If All was provided in the query,
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
     val body = list.map { item =>
-      val data: Map[String, Any] = item.fields().asScala.map { entry =>
-        (entry.getKey, entry.getValue)
-      }.toMap
+      val data = renderRow(item)
       // missing fields are represented by an empty str
-      headers.map {
-        header =>
-          Str(truncate(data.get(header).map {
-            // surround strings with quotes to differentiate them from ints
-            case s: String => s""""$s""""
-            //case list: java.util.ArrayList =>
-            //  list.asScala.take(5).toString
-            case other => other.toString
-          }.getOrElse("")))
-      }
+      headers.map(header => Str(truncate(data.getOrElse(header, ""))))
     }
     if (align) {
       val writer = new StringWriter()
       val out = new PrintWriter(writer)
-      out.println(Table(
-        if (withHeaders) headers else Seq.empty,
-        body,
-        width
-      ))
+      out.println(
+        Table(
+          if (withHeaders) headers else Seq.empty,
+          body,
+          width
+        )
+      )
       writer.toString
     } else {
       (headers +: body)
@@ -397,7 +447,7 @@ object Repl {
 
   //TODO: improve connection errors - check dynamo listening on provided port
 
-  def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDB = {
+  def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDBAsync = {
     val endpoint = opts.endpoint.orElse(config.endpoint)
     val credentials = opts.profile.map {
       new ProfileCredentialsProvider(_)
@@ -406,21 +456,24 @@ object Repl {
   }
 
   def dynamoClient(
-    endpoint: Option[String],
-    credentials: Option[AWSCredentialsProvider]
-  ): AmazonDynamoDB = {
+      endpoint: Option[String],
+      credentials: Option[AWSCredentialsProvider]
+  ): AmazonDynamoDBAsync = {
     val clientConfig = new ClientConfiguration()
       .withConnectionTimeout(1.second.toMillis.toInt)
       .withSocketTimeout(1.second.toMillis.toInt)
-    val builder = AmazonDynamoDBClientBuilder
+    val builder = AmazonDynamoDBAsyncClientBuilder
       .standard()
       .withClientConfiguration(clientConfig)
     val withEndpoint = endpoint.fold(builder) { endpoint =>
-      builder.withEndpointConfiguration(new EndpointConfiguration(endpoint, builder.getRegion))
+      builder.withEndpointConfiguration(
+        new EndpointConfiguration(endpoint, builder.getRegion)
+      )
     }
-    credentials.fold(withEndpoint) { credentials =>
-      withEndpoint.withCredentials(credentials)
-    }
+    credentials
+      .fold(withEndpoint) { credentials =>
+        withEndpoint.withCredentials(credentials)
+      }
       .build()
   }
 

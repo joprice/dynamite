@@ -1,13 +1,13 @@
 package dynamite
 
-import java.io.{ PrintWriter, StringWriter }
-import fansi.{ Bold, Str }
+import java.io.{PrintWriter, StringWriter}
+import fansi.{Bold, Str}
 
 object Table {
   def apply(
-    headers: Seq[String],
-    data: Seq[Seq[Str]],
-    width: Option[Int]
+      headers: Seq[String],
+      data: Seq[Seq[Str]],
+      width: Option[Int]
   ): String = {
     val str = new StringWriter()
     val out = new PrintWriter(str)
@@ -28,19 +28,25 @@ object Table {
     }
 
     rows.foreach { row =>
-      val output = row.zipWithIndex.flatMap {
-        case (col, i) =>
-          val max = maxes(i)
-          val size = col.length
-          val rendered = col.render
-          // avoid printing trailing spaces when the final column is empty
-          val isLast = i == row.size - 1
-          if (isLast && rendered.isEmpty) {
-            None
-          } else {
-            Some(if (size < max && i < row.size - 1) rendered + (" " * (max - size)) else rendered)
-          }
-      }.mkString(" " * 3)
+      val output = row.zipWithIndex
+        .flatMap {
+          case (col, i) =>
+            val max = maxes(i)
+            val size = col.length
+            val rendered = col.render
+            // avoid printing trailing spaces when the final column is empty
+            val isLast = i == row.size - 1
+            if (isLast && rendered.isEmpty) {
+              None
+            } else {
+              Some(
+                if (size < max && i < row.size - 1)
+                  rendered + (" " * (max - size))
+                else rendered
+              )
+            }
+        }
+        .mkString(" " * 3)
       out.println(output)
     }
 

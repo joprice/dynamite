@@ -1,67 +1,64 @@
 package dynamite
 
 import java.io.File
-import java.nio.file.Files
+import zio.ZManaged
+import zio.test._
+import zio.test.Assertion._
 
-import org.scalatest._
+object DynamiteConfigSpec extends DefaultRunnableSpec {
 
-object DynamiteConfigSpec {
-
-  // based on https://github.com/robey/scalatest-mixins/blob/master/src/main/scala/com/twitter/scalatest/TestFolder.scala
-  def withTempDirectory[A](f: File => A): A = {
-    def deleteFile(file: File) {
-      if (!file.exists) return
-      if (file.isFile) {
+  def deleteFile(file: File): Unit = {
+    if (file.exists) {
+      val deleted = if (file.isFile) {
         file.delete()
       } else {
         file.listFiles().foreach(deleteFile)
         file.delete()
       }
-    }
-    val tempFolder = System.getProperty("java.io.tmpdir")
-    var folder: File = null
-    do {
-      folder = new File(tempFolder, "scalatest-" + System.nanoTime)
-    } while (!folder.mkdir())
-    try {
-      f(folder)
-    } finally {
-      deleteFile(folder)
+      if (!deleted) {
+        throw new Exception(s"Failed to delee file $file")
+      }
     }
   }
+
+  // based on https://github.com/robey/scalatest-mixins/blob/master/src/main/scala/com/twitter/scalatest/TestFolder.scala
+  def tempDirectory[A] = {
+    ZManaged.makeEffect {
+      val tempFolder = System.getProperty("java.io.tmpdir")
+      var folder: File = null
+      do {
+        folder = new File(tempFolder, "scalatest-" + System.nanoTime)
+      } while (!folder.mkdir())
+      folder
+    } { folder => deleteFile(folder) }
+  }
+
+  def spec = suite("config")(
+    testM("load default values for empty file")(
+      tempDirectory.use { directory =>
+        for {
+          result <- DynamiteConfig.loadConfig(directory)
+          configFile = new File(directory, "config")
+          config <- DynamiteConfig.parseConfig(configFile)
+        } yield assert(configFile.exists)(isTrue) && assert(config)(
+          equalTo(DynamiteConfig())
+        )
+      }
+    ),
+    testM("load existing config file")(
+      tempDirectory.use { directory =>
+        val configFile = new File(directory, "config")
+        DynamiteConfig.write(
+          configFile,
+          """dynamite {
+            |  pageSize = 30
+            |}
+          """.stripMargin
+        )
+        assertM(DynamiteConfig.loadConfig(directory))(
+          equalTo(DynamiteConfig(pageSize = 30))
+        )
+      }
+    )
+  )
 }
-
-class DynamiteConfigSpec
-  extends FlatSpec
-  with Matchers
-  with TryValues
-  with EitherValues {
-  import DynamiteConfigSpec._
-
-  "config" should "load default values for empty file" in {
-    withTempDirectory { directory =>
-      val result = DynamiteConfig.loadConfig(directory).success.value
-      val configFile = new File(directory, "config")
-      configFile should exist
-      DynamiteConfig.parseConfig(configFile).success.value should be(DynamiteConfig())
-      result should be(DynamiteConfig())
-    }
-  }
-
-  it should "load existing config file" in {
-    withTempDirectory { directory =>
-      val configFile = new File(directory, "config")
-      DynamiteConfig.write(
-        configFile,
-        """dynamite {
-          |  pageSize = 30
-          |}
-        """.stripMargin
-      )
-      val result = DynamiteConfig.loadConfig(directory).success.value
-      result should be(DynamiteConfig(pageSize = 30))
-    }
-  }
-
-}
-

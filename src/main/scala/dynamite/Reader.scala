@@ -1,6 +1,6 @@
 package dynamite
 
-import fansi.{ Bold, Str }
+import fansi.{Bold, Str}
 import jline.console.ConsoleReader
 
 trait Reader {

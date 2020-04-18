@@ -1,378 +1,487 @@
 package dynamite
 
-import com.amazonaws.services.dynamodbv2.document.DynamoDB
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
+import dynamite.Ast.{Query, ReplCommand}
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
-import dynamite.Ast.{ Query, ReplCommand }
-import dynamite.Eval._
-import dynamite.Response.{ Complete, Index, KeySchema, TableDescription }
-import org.scalatest._
-import play.api.libs.json.Json
+import dynamite.Eval.{
+  AmbiguousIndexException,
+  InvalidHashKeyException,
+  InvalidRangeKeyException,
+  MissingRangeKeyException,
+  UnexpectedRangeKeyException,
+  UnknownIndexException,
+  UnknownTableException
+}
+import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
+import play.api.libs.json.{JsValue, Json}
+import zio.random.Random
+import zio.{Has, Task, ZIO, ZLayer, ZManaged}
+import zio.test.{TestAspect, _}
+import zio.test.Assertion._
 
-class EvalSpec
-  extends FlatSpec
-  with Matchers
-  with DynamoSpec
-  with TryValues
-  with EitherValues {
-
+object EvalSpec extends DefaultRunnableSpec {
   val tableName = "eval-spec"
   val rangeKeyTableName = "eval-spec-range-key"
 
-  val tableNames = Seq(
-    tableName,
-    rangeKeyTableName
-  )
+  val dynamoClient =
+    ScriptSpec.dynamoClient
 
-  lazy val tableCache = new TableCache(Eval.describeTable(dynamo, _))
+  case object CreateTables
+  type ClientInit = Has[CreateTables.type]
 
-  override def beforeEach() = {
-    super.beforeEach()
-    tableCache.clear()
-    Seed.createTable(tableName, client)
-    Seed.createTableWithoutHashKey(rangeKeyTableName, client)
-    Seed.insertSeedData(tableName, client)
-  }
-
-  def run(query: String): Either[Throwable, Response] =
-    Parser.parse(query).flatMap {
-      case result: Query => Eval(dynamo, result, 20, tableCache).toEither
-      case _: ReplCommand => ???
-    }
-
-  //TODO test non-existent table
-
-  def validate[A](query: String, expected: A) = {
-    run(query).map {
-      case Response.ResultSet(pages, _) =>
-        val json = pages.toList
-          .map { page =>
-            val result = page.result
-            result.failed.foreach { error =>
-              println(s"query '$query' failed: $error")
-            }
-            result.success.value.map(item => Json.parse(item.toString))
-          }
-        json should be(expected)
-      case _ => ???
-    }.left.map { error =>
-      throw error
-    }.right.value
-  }
-
-  "eval" should "select all records from dynamo" in {
-    validate(s"select id, name from $tableName", List(List(
-      Json.obj("id" -> 1, "name" -> "Chill Times"),
-      Json.obj("id" -> 2, "name" -> "EDM4LYFE"),
-      Json.obj("id" -> 3, "name" -> "Disco Fever"),
-      Json.obj("id" -> 4, "name" -> "Top Pop")
-    )))
-  }
-
-  it should "allow selecting all fields" in {
-    validate(s"select * from $tableName", List(Seed.seedData))
-  }
-
-  it should "allow explicit ascending order" in {
-    validate(
-      s"select * from $tableName where userId = 'user-id-1' order by id asc", List(
-        Seed.seedData
-          .filter(json => (json \ "userId").as[String] == "user-id-1")
-      )
-    )
-  }
-
-  it should "allow reversing the results " in {
-    validate(
-      s"select * from $tableName where userId = 'user-id-1' order by id desc", List(
-        Seed.seedData
-          .filter(json => (json \ "userId").as[String] == "user-id-1")
-          .reverse
-      )
-    )
-  }
-
-  // TODO: warn when fields are not present in type
-  // TODO: disallow asc/desc on scan?
-  // TODO: nested fields
-  // TODO: catch com.amazonaws.AmazonServiceException where message contains 'Query condition missed key schema element'
-
-  it should "select all records for a given user" in {
-    validate(
-      s"select name from $tableName where userId = 'user-id-1'", List(List(
-        Json.obj("name" -> "Chill Times"),
-        Json.obj("name" -> "EDM4LYFE")
-      ))
-    )
-  }
-
-  it should "limit results" in {
-    validate(
-      s"select name from $tableName where userId = 'user-id-1' limit 1", List(List(
-        Json.obj("name" -> "Chill Times")
-      ))
-    )
-  }
-
-  it should "support updating a field" in {
-    val newName = "Chill Timez"
-    run(
-      s"update $tableName set name = '$newName' where userId = 'user-id-1' and id = 1"
-    ).right.value
-    validate(
-      s"select name from $tableName where userId = 'user-id-1' and id = 1", List(List(
-        Json.obj("name" -> newName)
-      ))
-    )
-  }
-
-  it should "support updating an object field" in {
-    val first = Seed.seedData.head
-    val userId = (first \ "userId").as[String]
-    val id = (first \ "id").as[Int]
-    run(
-      s"""update $tableName set meta = {
-      "tags": ["rock", "metal"],
-      "visibility": "private"
-      } where userId = '$userId' and id = $id"""
-    ).right.value
-    validate(
-      s"select * from $tableName where userId = '$userId' and id = $id", List(List(
-        first ++ Json.obj(
-          "meta" -> Json.obj(
-            "tags" -> List("rock", "metal"),
-            "visibility" -> "private"
-          )
-        )
-      ))
-    )
-  }
-
-  it should "support updating without range key" in {
-    val newName = "new title"
-    val userId = "user-id-1"
-    run(
-      s"""insert into $rangeKeyTableName (userId, name) values ('$userId', "original-title")"""
-    ).right.value
-    run(
-      s"update $rangeKeyTableName set name = '$newName' where userId = '$userId'"
-    ).right.value
-    validate(
-      s"select name from $rangeKeyTableName where userId = '$userId'", List(List(
-        Json.obj("name" -> newName)
-      ))
-    )
-  }
-
-  it should "support deleting a record" in {
-    run(
-      s"delete from $tableName where userId = 'user-id-1' and id = 1"
-    ).right.value
-    validate(
-      s"select name from $tableName where userId = 'user-id-1' and id = 1", List(List())
-    )
-  }
-
-  it should "support inserting a record" in {
-    val newName = "Throwback Thursday"
-    run(
-      s"""insert into $tableName (userId, id, name, tracks) values ('user-id-1', 20, "$newName", [1,2,3])"""
-    ).right.value
-    validate(
-      s"select name from $tableName where userId = 'user-id-1' and id = 20", List(List(
-        Json.obj("name" -> newName)
-      ))
-    )
-  }
-
-  it should "support float values" in {
-    val newName = "Throwback Thursday"
-    run(
-      s"""insert into $tableName (userId, id, name, duration) values ('user-id-1', 20, "$newName", 1.1)"""
-    ).right.value
-    validate(
-      s"select duration from $tableName where userId = 'user-id-1' and id = 20", List(List(
-        Json.obj("duration" -> 1.1)
-      ))
-    )
-  }
-
-  // TODO: this could use playlist-name or playlist-name-global
-  it should "use an index when unambiguous" in {
-    validate(s"select id from $tableName where userId = 'user-id-1' and name = 'EDM4LYFE'", List(List(
-      Json.obj("id" -> 2)
-    )))
-  }
-
-  it should "fail when table is unknown" in {
-    run(
-      s"select id from unknown-table where userId = 'user-id-1' and name = 'EDM4LYFE'"
-    ).left.value shouldBe an[UnknownTableException]
-  }
-
-  it should "return ambiguous index error" in {
-    run(s"select id from $tableName where userId = 'user-id-1' and duration = 10")
-      .left.value shouldBe an[AmbiguousIndexException]
-  }
-
-  it should "use an explicit index when provided" in {
-    validate(
-      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only",
-      List(List(
-        Json.obj("id" -> 2),
-        Json.obj("id" -> 1)
-      ))
-    )
-  }
-
-  it should "fail when invalid range key is used with explicit index" in {
-    val index = "playlist-length-keys-only"
-    run(
-      s"select id from $tableName where userId = 'user-id-1' and id = 1 use index $index"
-    ).left.value shouldBe InvalidRangeKeyException(
-        index,
-        KeySchema("duration", ScalarAttributeType.N),
-        "id"
-      )
-  }
-
-  it should "fail when range key is provided for an explicit index that doesn't have a range key" in {
-    val index = "playlist-name-global"
-    run(
-      s"select id from $tableName where name = 'name' and id = 1 use index $index"
-    ).left.value shouldBe UnexpectedRangeKeyException("id")
-  }
-
-  it should "fail when range key is not provided for an explicit index that does have a range key" in {
-    val index = "playlist-length-keys-only"
-    run(
-      s"select id from $tableName where userId = 'user-id-1' use index $index"
-    ).left.value shouldBe MissingRangeKeyException("duration")
-  }
-
-  it should "fail when index does not exist with hash provided" in {
-    run(
-      s"select id from $tableName where userId = 'user-id-1' use index fake-index"
-    ).left.value shouldBe UnknownIndexException("fake-index")
-  }
-
-  it should "fail when index does not exist with hash and range provided" in {
-    run(
-      s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index fake-index"
-    ).left.value shouldBe UnknownIndexException("fake-index")
-  }
-
-  it should "fail when hash key does not match index hash key" in {
-    run(
-      s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
-    ).left.value shouldBe InvalidHashKeyException(
-        Index(
-          "playlist-name",
-          KeySchema("userId", ScalarAttributeType.S), Some(KeySchema("name", ScalarAttributeType.S))
-        ),
-        "name"
-      )
-  }
-
-  it should "query against an explicit index" in {
-    validate(
-      s"select id from $tableName where name = 'Disco Fever' use index playlist-name-global",
-      List(List(
-        Json.obj("id" -> 3)
-      ))
-    )
-  }
-
-  it should "query against an index when unambiguous" in {
-    validate(
-      s"select id from $tableName where name = 'Disco Fever'",
-      List(List(
-        Json.obj("id" -> 3)
-      ))
-    )
-  }
-
-  "aggregate" should "support count" in {
-    validate(s"select count(*) from $tableName", List(List(
-      Json.obj("count" -> 4)
-    )))
-  }
-
-  it should "support count with filters" in {
-    validate(s"select count(*) from $tableName where userId = 'user-id-1'", List(List(
-      Json.obj("count" -> 2)
-    )))
-  }
-
-  it should "fail on count with column name" in {
-    val ex = run(s"select count(id) from $tableName where userId = 'user-id-1'").left.value
-    ex.getMessage should be("Failed parsing query")
-  }
-
-  it should "support count with other fields" in {
-    val ex = run(s"select count(*), name from $tableName").left.value
-    ex.getMessage should be(
-      "Aggregates may not be used with unaggregated fields"
-    )
-  }
-
-  it should "return consumed capacity" in {
-    run(
-      s"select count(*) from $tableName where userId = 'user-id-1'"
-    ).right.value should matchPattern {
-        case Response.ResultSet(_, Some(_)) =>
+  val createTables =
+    ZManaged
+      .access[DynamoClient](_.get)
+      .flatMap { client =>
+        ZManaged.makeEffect(
+          Seed.createTableWithoutHashKey(rangeKeyTableName, client)
+        )(_ => client.deleteTable(rangeKeyTableName)) *>
+          ZManaged
+            .makeEffect(Seed.createTable(tableName, client))(_ =>
+              client.deleteTable(tableName)
+            )
+            .as(client)
+            .tapM { client => Task(Seed.insertSeedData(tableName, client)) }
       }
-  }
 
-  it should "return table description" in {
-    val result = run(
-      s"describe table $tableName"
-    )
-    result.right.value should matchPattern {
-      case TableDescription(
-        "eval-spec",
-        KeySchema("userId", ScalarAttributeType.S),
-        Some(KeySchema("id", ScalarAttributeType.N)),
-        Seq(
-          Index(
-            "playlist-name-global",
-            KeySchema("name", ScalarAttributeType.S),
-            None
-            ),
-          Index(
-            "playlist-length",
-            KeySchema("userId", ScalarAttributeType.S),
-            Some(KeySchema("duration", ScalarAttributeType.N))
-            ),
-          Index(
-            "playlist-length-keys-only",
-            KeySchema("userId", ScalarAttributeType.S),
-            Some(KeySchema("duration", ScalarAttributeType.N))
-            ),
-          Index(
-            "playlist-name",
-            KeySchema("userId", ScalarAttributeType.S),
-            Some(KeySchema("name", ScalarAttributeType.S))
+  type DynamoClient = Has[AmazonDynamoDBAsync]
+
+  def run(query: String): ZIO[Random with DynamoClient, Throwable, Response] =
+    ZManaged
+      .access[DynamoClient](_.get)
+      .use { client =>
+        val tableCache = new TableCache(Eval.describeTable(client, _))
+        ZIO.fromEither(Parser.parse(query)).flatMap {
+          case result: Query => Eval(client, result, 20, tableCache)
+          case _: ReplCommand =>
+            Task.fail(new Exception("Invalid command type"))
+        }
+      }
+
+  //TODO: restructure test to use Access for client/table, to avoid recreating table
+  def validate(
+      query: String,
+      expected: List[List[JsValue]]
+  ): ZIO[Random with DynamoClient, Throwable, TestResult] =
+    run(query)
+      .flatMap {
+        case Response.ResultSet(pages, _) =>
+          ZIO
+            .foreach(pages.toList) { page =>
+              val result = page.result
+//              result.failed.foreach { error =>
+//                println(s"query '$query' failed: $error")
+//              }
+              ZIO.fromTry(result)
+            }
+            .map { result =>
+              val parsed = result.map {
+                _.map(json => Script.dynamoObjectToJson(json))
+              }
+              assert(parsed)(equalTo(expected))
+            }
+        case _ => Task.fail(new Exception("Invalid result"))
+      }
+
+  def spec =
+    suite("eval")(
+      testM("select all records from dynamo") {
+//        tables.use_ {
+        validate(
+          s"select id, name from $tableName",
+          List(
+            List(
+              Json.obj("id" -> 1, "name" -> "Chill Times"),
+              Json.obj("id" -> 2, "name" -> "EDM4LYFE"),
+              Json.obj("id" -> 3, "name" -> "Disco Fever"),
+              Json.obj("id" -> 4, "name" -> "Top Pop")
             )
           )
-        ) =>
-    }
-  }
-
-  it should "render an error when table does not exist" in {
-    val result = run(s"describe table non-existent-table")
-    result.right.value should matchPattern {
-      case Response.Info("No table exists with name non-existent-table") =>
-    }
-  }
-
-  "lazy iterator" should "iterate once" in {
-    var i = 0
-    val it = Eval.LazySingleIterator(i += 1)
-    it.hasNext shouldBe true
-    it.next()
-    it.hasNext shouldBe false
-    a[NoSuchElementException] should be thrownBy it.next()
-    i shouldBe 1
-  }
-
+        )
+//        }
+      },
+      testM("allow selecting all fields") {
+        validate(s"select * from $tableName", List(Seed.seedData))
+      },
+      testM("allow explicit ascending order") {
+        validate(
+          s"select * from $tableName where userId = 'user-id-1' order by id asc",
+          List(
+            Seed.seedData
+              .filter(json => (json \ "userId").as[String] == "user-id-1")
+          )
+        )
+      },
+      testM("allow reversing the results ") {
+        validate(
+          s"select * from $tableName where userId = 'user-id-1' order by id desc",
+          List(
+            Seed.seedData
+              .filter(json => (json \ "userId").as[String] == "user-id-1")
+              .reverse
+          )
+        )
+      },
+      // TODO: warn when fields are not present in type
+      // TODO: disallow asc/desc on scan?
+      // TODO: nested fields
+      // TODO: catch com.amazonaws.AmazonServiceException where message contains 'Query condition missed key schema element'
+      testM("select all records for a given user") {
+        validate(
+          s"select name from $tableName where userId = 'user-id-1'",
+          List(
+            List(
+              Json.obj("name" -> "Chill Times"),
+              Json.obj("name" -> "EDM4LYFE")
+            )
+          )
+        )
+      },
+      testM("limit results") {
+        validate(
+          s"select name from $tableName where userId = 'user-id-1' limit 1",
+          List(
+            List(
+              Json.obj("name" -> "Chill Times")
+            )
+          )
+        )
+      },
+      testM("support updating a field") {
+        val newName = "Chill Timez"
+        run(
+          s"update $tableName set name = '$newName' where userId = 'user-id-1' and id = 1"
+        ) *>
+          validate(
+            s"select name from $tableName where userId = 'user-id-1' and id = 1",
+            List(
+              List(
+                Json.obj("name" -> newName)
+              )
+            )
+          )
+      },
+      testM("support updating an object field") {
+        val first = Seed.seedData.head
+        val userId = (first \ "userId").as[String]
+        val id = (first \ "id").as[Int]
+        run(
+          s"""update $tableName set meta = {
+          "tags": ["rock", "metal"],
+          "visibility": "private"
+          } where userId = '$userId' and id = $id"""
+        ) *>
+          validate(
+            s"select * from $tableName where userId = '$userId' and id = $id",
+            List(
+              List(
+                first ++ Json.obj(
+                  "meta" -> Json.obj(
+                    "tags" -> List("rock", "metal"),
+                    "visibility" -> "private"
+                  )
+                )
+              )
+            )
+          )
+      },
+      testM("support updating without range key") {
+        val newName = "new title"
+        val userId = "user-id-1"
+        run(
+          s"""insert into $rangeKeyTableName (userId, name) values ('$userId', "original-title")"""
+        ) *>
+          run(
+            s"update $rangeKeyTableName set name = '$newName' where userId = '$userId'"
+          ) *>
+          validate(
+            s"select name from $rangeKeyTableName where userId = '$userId'",
+            List(
+              List(
+                Json.obj("name" -> newName)
+              )
+            )
+          )
+      },
+      testM("support deleting a record") {
+        run(
+          s"delete from $tableName where userId = 'user-id-1' and id = 1"
+        ) *>
+          validate(
+            s"select name from $tableName where userId = 'user-id-1' and id = 1",
+            List(List())
+          )
+      },
+      testM("support inserting a record") {
+        val newName = "Throwback Thursday"
+        run(
+          s"""insert into $tableName (userId, id, name, tracks) values ('user-id-1', 20, "$newName", [1,2,3])"""
+        ) *>
+          validate(
+            s"select name from $tableName where userId = 'user-id-1' and id = 20",
+            List(
+              List(
+                Json.obj("name" -> newName)
+              )
+            )
+          )
+      },
+      testM("support float values") {
+        val newName = "Throwback Thursday"
+        run(
+          s"""insert into $tableName (userId, id, name, duration) values ('user-id-1', 20, "$newName", 1.1)"""
+        ) *>
+          validate(
+            s"select duration from $tableName where userId = 'user-id-1' and id = 20",
+            List(
+              List(
+                Json.obj("duration" -> 1.1)
+              )
+            )
+          )
+      },
+      // TODO: this could use playlist-name or playlist-name-global
+      testM("use an index when unambiguous") {
+        validate(
+          s"select id from $tableName where userId = 'user-id-1' and name = 'EDM4LYFE'",
+          List(
+            List(
+              Json.obj("id" -> 2)
+            )
+          )
+        )
+      },
+      testM("fail when table is unknown") {
+        assertM(
+          run(
+            s"select id from unknown-table where userId = 'user-id-1' and name = 'EDM4LYFE'"
+          ).flip
+        )(isSubtype[UnknownTableException](anything))
+      },
+      testM("return ambiguous index error") {
+        assertM(
+          run(
+            s"select id from $tableName where userId = 'user-id-1' and duration = 10"
+          ).flip
+        )(isSubtype[AmbiguousIndexException](anything))
+      },
+      testM("use an explicit index when provided") {
+        validate(
+          s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only",
+          List(
+            List(
+              Json.obj("id" -> 2),
+              Json.obj("id" -> 1)
+            )
+          )
+        )
+      },
+      testM("fail when invalid range key is used with explicit index") {
+        val index = "playlist-length-keys-only"
+        assertM(
+          run(
+            s"select id from $tableName where userId = 'user-id-1' and id = 1 use index $index"
+          ).flip
+        )(
+          equalTo(
+            InvalidRangeKeyException(
+              index,
+              KeySchema("duration", ScalarAttributeType.N),
+              "id"
+            )
+          )
+        )
+      },
+      testM(
+        "fail when range key is provided for an explicit index that doesn't have a range key"
+      ) {
+        val index = "playlist-name-global"
+        assertM(
+          run(
+            s"select id from $tableName where name = 'name' and id = 1 use index $index"
+          ).flip
+        )(equalTo(UnexpectedRangeKeyException("id")))
+      },
+      testM(
+        "fail when range key is not provided for an explicit index that does have a range key"
+      ) {
+        val index = "playlist-length-keys-only"
+        assertM(
+          run(
+            s"select id from $tableName where userId = 'user-id-1' use index $index"
+          ).flip
+        )(equalTo(MissingRangeKeyException("duration")))
+      },
+      testM("fail when index does not exist with hash provided") {
+        assertM(
+          run(
+            s"select id from $tableName where userId = 'user-id-1' use index fake-index"
+          ).flip
+        )(equalTo(UnknownIndexException("fake-index")))
+      },
+      testM("fail when index does not exist with hash and range provided") {
+        assertM(
+          run(
+            s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index fake-index"
+          ).flip
+        )(equalTo(UnknownIndexException("fake-index")))
+      },
+      testM("fail when hash key does not match index hash key") {
+        assertM(
+          run(
+            s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
+          ).flip
+        )(
+          equalTo(
+            InvalidHashKeyException(
+              Index(
+                "playlist-name",
+                KeySchema("userId", ScalarAttributeType.S),
+                Some(KeySchema("name", ScalarAttributeType.S))
+              ),
+              "name"
+            )
+          )
+        )
+      },
+      testM("query against an explicit index") {
+        validate(
+          s"select id from $tableName where name = 'Disco Fever' use index playlist-name-global",
+          List(
+            List(
+              Json.obj("id" -> 3)
+            )
+          )
+        )
+      },
+      testM("query against an index when unambiguous") {
+        validate(
+          s"select id from $tableName where name = 'Disco Fever'",
+          List(
+            List(
+              Json.obj("id" -> 3)
+            )
+          )
+        )
+      },
+      testM("aggregate supports count") {
+        validate(
+          s"select count(*) from $tableName",
+          List(
+            List(
+              Json.obj("count" -> 4)
+            )
+          )
+        )
+      },
+      testM("support count with filters") {
+        validate(
+          s"select count(*) from $tableName where userId = 'user-id-1'",
+          List(
+            List(
+              Json.obj("count" -> 2)
+            )
+          )
+        )
+      },
+      testM("fail on count with column name") {
+        assertM(
+          run(s"select count(id) from $tableName where userId = 'user-id-1'").flip
+            .map(_.getMessage)
+        )(equalTo("Failed parsing query"))
+      },
+      testM("support count with other fields") {
+        assertM(
+          run(s"select count(*), name from $tableName").flip.map(_.getMessage)
+        )(
+          equalTo(
+            "Aggregates may not be used with unaggregated fields"
+          )
+        )
+      },
+      //TODO: validate that keys match table
+//      testM("validate key schema") {
+//        assertM(
+//          run(
+//            s"select count(*) from $tableName where userid = 'user-id-1'"
+//          ).flatMap {
+//            case ResultSet(_, capacity) => Task.succeed(capacity)
+//            case _                      => Task.fail(new Exception("Unexpected result"))
+//          }
+//        )(isSome(anything))
+//      },
+      testM("return consumed capacity") {
+        assertM(
+          run(
+            s"select count(*) from $tableName where userId = 'user-id-1'"
+          ).flatMap {
+            case ResultSet(_, capacity) => Task.succeed(capacity)
+            case _                      => Task.fail(new Exception("Unexpected result"))
+          }
+        )(isSome(anything))
+      },
+      testM("return table description") {
+        run(
+          s"describe table $tableName"
+        ).flatMap {
+            case table: TableDescription => Task.succeed(table)
+            case _                       => Task.fail(new Exception("Unexpected result"))
+          }
+          .map {
+            table =>
+              assert(table)(
+                equalTo(
+                  TableDescription(
+                    "eval-spec",
+                    KeySchema("userId", ScalarAttributeType.S),
+                    Some(KeySchema("id", ScalarAttributeType.N)),
+                    Seq(
+                      Index(
+                        "playlist-name-global",
+                        KeySchema("name", ScalarAttributeType.S),
+                        None
+                      ),
+                      Index(
+                        "playlist-length",
+                        KeySchema("userId", ScalarAttributeType.S),
+                        Some(KeySchema("duration", ScalarAttributeType.N))
+                      ),
+                      Index(
+                        "playlist-length-keys-only",
+                        KeySchema("userId", ScalarAttributeType.S),
+                        Some(KeySchema("duration", ScalarAttributeType.N))
+                      ),
+                      Index(
+                        "playlist-name",
+                        KeySchema("userId", ScalarAttributeType.S),
+                        Some(KeySchema("name", ScalarAttributeType.S))
+                      )
+                    )
+                  )
+                )
+              )
+          }
+      },
+      testM("render an error when table does not exist") {
+        assertM(run(s"describe table non-existent-table"))(
+          equalTo(Response.Info("No table exists with name non-existent-table"))
+        )
+      }
+//
+//        test ("lazy iterator" should "iterate once") {
+//          var i = 0
+//          val it = Eval.LazySingleIterator(i += 1)
+//          it.hasNext shouldBe true
+//          it.next()
+//          it.hasNext shouldBe false
+//          a[NoSuchElementException] should be thrownBy it.next()
+//          i shouldBe 1
+//        }
+    ) @@ TestAspect.sequential @@ TestAspect.aroundTest(
+      createTables
+        .map(_ => ZIO.succeed(_: TestSuccess))
+        .mapError(TestFailure.die)
+    ) provideCustomLayerShared ZLayer
+      .fromManaged(dynamoClient)
+      .orDie
 }
