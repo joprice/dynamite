@@ -23,7 +23,7 @@ object ReplSpec extends DefaultRunnableSpec {
 
   def withReader[A](query: String) =
     ZManaged.makeEffect(
-      new TestReader(query)
+      new dynamite.Reader.TestReader(query)
     )(_.close())
 
   def spec =

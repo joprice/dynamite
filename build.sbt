@@ -14,9 +14,9 @@ addCommandAlias(
   "validate",
   Seq(
     "clean",
-    "coverage",
-    "test",
-    "coverageReport"
+    //"coverage",
+    "test"
+    //"coverageReport"
   ).mkString(";", ";", "")
 )
 
