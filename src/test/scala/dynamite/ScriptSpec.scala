@@ -3,6 +3,7 @@ package dynamite
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
+import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBAsync}
 import com.amazonaws.services.dynamodbv2.model.{
   AttributeDefinition,
@@ -17,6 +18,7 @@ import zio.ZManaged
 import zio.test._
 import zio.test.Assertion._
 import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
+
 import scala.jdk.CollectionConverters._
 
 object ScriptSpec extends DefaultRunnableSpec {
@@ -82,7 +84,9 @@ object ScriptSpec extends DefaultRunnableSpec {
       Repl
         .dynamoClient(
           endpoint = Some(s"http://localhost:$port"),
-          credentials = None
+          credentials = Some(
+            new AWSStaticCredentialsProvider(new BasicAWSCredentials("", ""))
+          )
         )
     )(_.shutdown())
 
