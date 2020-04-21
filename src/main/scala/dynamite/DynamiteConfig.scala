@@ -56,7 +56,7 @@ object DynamiteConfig {
   )
 
   def parseConfig(file: File) =
-    TypeSafeConfigSource
+    TypesafeConfigSource
       .fromHoconFile(file)
       .flatMap(in => ZIO.fromEither(read(descriptor.from(in))))
       .mapError(error => new RuntimeException(error))
