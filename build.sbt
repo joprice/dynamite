@@ -58,7 +58,7 @@ classpathTypes ++= Set("dylib", "so")
 
 val zioVersion = "1.0.0-RC18-2"
 val scanamoVersion = "1.0.0-M12-1"
-val zioConfigVersion = "1.0.0-RC16-1"
+val zioConfigVersion = "1.0.0-RC16-2"
 
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "2.3.0",
@@ -115,7 +115,9 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ywarn-dead-code",
   "-Ywarn-numeric-widen",
   "-Ywarn-unused:patvars,-implicits",
-  "-Ywarn-value-discard"
+  "-Ywarn-value-discard",
+  "-Ybackend-parallelism", math.min(java.lang.Runtime.getRuntime.availableProcessors, 16).toString,
+  "-Ycache-plugin-class-loader:always"
 )
 
 scalacOptions in (Test, compile) ++= (scalacOptions in (Compile, compile)).value
@@ -156,3 +158,5 @@ releaseProcess := Seq[ReleaseStep](
   commitNextVersion,
   pushChanges
 )
+
+addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
