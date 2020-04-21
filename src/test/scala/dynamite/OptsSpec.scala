@@ -1,14 +1,11 @@
 package dynamite
 
-import java.io.{ ByteArrayOutputStream, File }
+import zio.test._
+import zio.test.Assertion._
+import java.io.{ByteArrayOutputStream, File}
 import java.nio.charset.StandardCharsets
 
-import org.scalatest._
-
-class OptsSpec
-  extends FlatSpec
-  with Matchers
-  with OptionValues {
+object OptsSpec extends DefaultRunnableSpec {
 
   def captureStdErr[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
@@ -17,49 +14,46 @@ class OptsSpec
     (output, result)
   }
 
-  "opts" should "fail on unknown option" in {
-    val (out, _) = captureStdErr {
-      Opts.parse(Seq("--invalid=2"))
+  def spec = suite("opts")(
+    test("fail on unknown option") {
+      val (out, _) = captureStdErr {
+        Opts.parse(Seq("--invalid=2"))
+      }
+      assert(out)(startsWithString("Error: Unknown option --invalid=2"))
+    },
+    test("support config-file option") {
+      val result = Opts.parse(Seq("--config-file=/tmp/custom-config"))
+      assert(result.flatMap(_.configFile))(
+        isSome(equalTo(new File("/tmp/custom-config")))
+      )
+    },
+    test("support endpoint option") {
+      val result = Opts.parse(Seq("--endpoint=some-endpoint"))
+      assert(result.flatMap(_.endpoint))(isSome(equalTo("some-endpoint")))
+    },
+    test("support json format option") {
+      val result = Opts.parse(Seq("--format=json"))
+      assert(result.map(_.format))(isSome(equalTo(Format.Json)))
+    },
+    test("support json-pretty format option") {
+      val result = Opts.parse(Seq("--format=json-pretty"))
+      assert(result.map(_.format))(isSome(equalTo(Format.JsonPretty)))
+    },
+    test("support tabular format option") {
+      val result = Opts.parse(Seq("--format=tabular"))
+      assert(result.map(_.format))(isSome(equalTo(Format.Tabular)))
+    },
+    test("fail on invalid format option") {
+      val (err, _) = captureStdErr {
+        Opts.parse(Seq("--format=unknown"))
+      }
+      assert(err)(
+        startsWithString("Error: Option --format failed when given 'unknown'")
+      )
+    },
+    test("support script option") {
+      val result = Opts.parse(Seq("--script=a script"))
+      assert(result.flatMap(_.script))(isSome(equalTo("a script")))
     }
-    out should startWith("Error: Unknown option --invalid=2")
-  }
-
-  it should "support config-file option" in {
-    val result = Opts.parse(Seq("--config-file=/tmp/custom-config")).value
-    result.configFile.value shouldBe new File("/tmp/custom-config")
-  }
-
-  it should "support endpoint option" in {
-    val result = Opts.parse(Seq("--endpoint=some-endpoint")).value
-    result.endpoint.value shouldBe "some-endpoint"
-  }
-
-  it should "support json format option" in {
-    val result = Opts.parse(Seq("--format=json")).value
-    result.format shouldBe Format.Json
-  }
-
-  it should "support json-pretty format option" in {
-    val result = Opts.parse(Seq("--format=json-pretty")).value
-    result.format shouldBe Format.JsonPretty
-  }
-
-  it should "support tabular format option" in {
-    val result = Opts.parse(Seq("--format=tabular")).value
-    result.format shouldBe Format.Tabular
-  }
-
-  it should "fail on invalid format option" in {
-    val (err, _) = captureStdErr {
-      Opts.parse(Seq("--format=unknown"))
-    }
-    err should startWith("Error: Option --format failed when given 'unknown'")
-  }
-
-  it should "support script option" in {
-    val result = Opts.parse(Seq("--script=a script")).value
-    result.script.value shouldBe "a script"
-  }
-
+  )
 }
-

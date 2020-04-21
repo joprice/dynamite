@@ -12,4 +12,3 @@ object Timed {
     Timed(result, (after - before).nanos)
   }
 }
-

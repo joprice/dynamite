@@ -3,23 +3,97 @@ package dynamite
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
-import com.amazonaws.services.dynamodbv2.model.{ AttributeValue, ScanRequest, ScanResult }
-import com.amazonaws.services.dynamodbv2.{ AmazonDynamoDB, model }
-import com.amazonaws.services.dynamodbv2.document.spec.ListTablesSpec
-import com.amazonaws.services.dynamodbv2.model._
-import jline.internal.Ansi
-import org.scalamock.matchers.MockParameter
-import org.scalatest._
-import org.scalamock.scalatest.MockFactory
+import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
+import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBAsync}
+import com.amazonaws.services.dynamodbv2.model.{
+  AttributeDefinition,
+  AttributeValue,
+  KeySchemaElement,
+  KeyType,
+  ProvisionedThroughput,
+  ScalarAttributeType
+}
+import zio.test.environment.TestConsole
+import zio.ZManaged
+import zio.test._
+import zio.test.Assertion._
+import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
-class ScriptSpec
-  extends FlatSpec
-  with Matchers
-  with MockFactory
-  with EitherValues {
+object ScriptSpec extends DefaultRunnableSpec {
+  private def attributeDefinitions(
+      attributes: Seq[(String, ScalarAttributeType)]
+  ) =
+    attributes.map {
+      case (symbol, attributeType) =>
+        new AttributeDefinition(symbol, attributeType)
+    }.asJava
+
+  def createTable(
+      client: AmazonDynamoDB
+  )(tableName: String)(attributes: (String, ScalarAttributeType)*) =
+    client.createTable(
+      attributeDefinitions(attributes),
+      tableName,
+      keySchema(attributes),
+      new ProvisionedThroughput(1L, 1L)
+    )
+
+  private def keySchema(attributes: Seq[(String, ScalarAttributeType)]) = {
+    attributes.toList match {
+      case Nil => throw new Exception("Invalid key schema")
+      case hashKeyWithType :: rangeKeyWithType =>
+        val keySchemas =
+          hashKeyWithType._1 -> KeyType.HASH :: rangeKeyWithType.map(
+            _._1 -> KeyType.RANGE
+          )
+        keySchemas.map {
+          case (symbol, keyType) => new KeySchemaElement(symbol, keyType)
+        }.asJava
+    }
+  }
+
+  def withTable[T](tableName: String)(
+      attributeDefinitions: (String, ScalarAttributeType)*
+  )(
+      client: AmazonDynamoDB
+  ) =
+    ZManaged.makeEffect {
+      createTable(client)(tableName)(attributeDefinitions: _*)
+    }(_ => client.deleteTable(tableName))
+
+  val randomPort = {
+    // arbitrary value to avoid common low number ports
+    val minPort = 10000
+    zio.random
+      .nextInt(65535 - minPort)
+      .map(_ + minPort)
+  }
+
+  def dynamoServer(port: Int) =
+    ZManaged.makeEffect {
+      val localArgs = Array("-inMemory", s"-port", s"$port")
+      val server = ServerRunner.createServerFromCommandLineArgs(localArgs)
+      server.start()
+      server
+    }(_.stop)
+
+  def dynamoLocalClient(port: Int) =
+    ZManaged.makeEffect(
+      Repl
+        .dynamoClient(
+          endpoint = Some(s"http://localhost:$port"),
+          credentials = Some(
+            new AWSStaticCredentialsProvider(new BasicAWSCredentials("", ""))
+          )
+        )
+    )(_.shutdown())
+
+  val dynamoClient =
+    ZManaged
+      .fromEffect(randomPort)
+      .flatMap { port => dynamoServer(port) *> dynamoLocalClient(port) }
 
   def captureStdOut[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
@@ -28,175 +102,172 @@ class ScriptSpec
     (output, result)
   }
 
-  //  def withStdIn[A](input: String)(f: => A) = {
-  //    val stream = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8))
-  //    Console.withIn(stream)(f)
-  //  }
-
-  "repl" should "fail with error message" in {
-    val input = "select * from playlists limit 1"
-    val client = mock[AmazonDynamoDB]
-    (client.scan(_: ScanRequest)).expects(
-      new ScanRequest()
-        .withTableName("playlists")
-        .withLimit(1)
-    ).returns(
-        new ScanResult()
-          .withItems(Seq(
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("123")
-            ),
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("456")
-            )
-          ).map(_.asJava).asJava)
+  def insertRows(client: AmazonDynamoDBAsync) =
+    for {
+      _ <- Dynamo.putItem(
+        client,
+        "playlists",
+        Map(
+          "id" -> new AttributeValue("123")
+        )
       )
-    val (out, result) = captureStdOut {
-      Script(Opts(), input, client)
-    }
-    result.right.value
-    out shouldBe
-      """id
-        |"123"
-        |"456"
-        |""".stripMargin
-  }
-
-  it should "render as json" in {
-    val input = "select * from playlists limit 1"
-    val client = mock[AmazonDynamoDB]
-    (client.scan(_: ScanRequest)).expects(
-      new ScanRequest()
-        .withTableName("playlists")
-        .withLimit(1)
-    ).returns(
-        new ScanResult()
-          .withItems(Seq(
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("123")
-            ),
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("456")
-            )
-          ).map(_.asJava).asJava)
+      _ <- Dynamo.putItem(
+        client,
+        "playlists",
+        Map(
+          "id" -> new AttributeValue("456")
+        )
       )
-    val (out, result) = captureStdOut {
-      Script(Opts(format = Format.Json), input, client)
-    }
-    result.right.value
-    out shouldBe
-      """{"id":"123"}
-        |{"id":"456"}
-        |""".stripMargin
-  }
+    } yield ()
 
-  it should "render as json-pretty" in {
-    val input = "select * from playlists limit 1"
-    val client = mock[AmazonDynamoDB]
-    (client.scan(_: ScanRequest)).expects(
-      new ScanRequest()
-        .withTableName("playlists")
-        .withLimit(1)
-    ).returns(
-        new ScanResult()
-          .withItems(Seq(
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("123")
-            ),
-            Map[String, AttributeValue](
-              "id" -> new AttributeValue("456")
-            )
-          ).map(_.asJava).asJava)
+  val withPlaylistTable =
+    dynamoClient
+      .flatMap(client =>
+        withTable("playlists")("id" -> ScalarAttributeType.S)(
+          client
+        ).as(client)
       )
-    val (out, result) = captureStdOut {
-      Script(Opts(format = Format.JsonPretty), input, client)
-    }
-    result.right.value
-    out shouldBe
-      """{
-        |  "id": "123"
-        |}
-        |{
-        |  "id": "456"
-        |}
-        |""".stripMargin
-  }
 
-  it should "render an error when parsing fails" in {
-    val input = "select * from playlists limid"
-    val client = mock[AmazonDynamoDB]
-    val (out, result) = captureStdOut {
-      Script(Opts(format = Format.JsonPretty), input, client)
-    }
-    out shouldBe empty
-    result.left.value shouldBe
-      """[error] Failed to parse query
-        |select * from playlists limid
-        |                        ^""".stripMargin
-  }
-
-  it should "render table names" in {
-    val input = "show tables"
-    val client = mock[AmazonDynamoDB]
-    val request = new ListTablesRequest()
-    (client.listTables(_: ListTablesRequest))
-      .expects(request)
-      .returns(
-        new ListTablesResult()
-          .withTableNames(
-            "playlists",
-            "tracks"
+  def spec =
+    suite("script")(
+      testM("fail with error message") {
+        val input = "select * from playlists limit 1"
+        dynamoClient
+          .flatMap(client =>
+            withTable("playlists")("id" -> ScalarAttributeType.S)(
+              client
+            ).as(client)
           )
-      )
-    val (out, result) = captureStdOut {
-      Script(Opts(), input, client)
-    }
-    result.right.value
-    out shouldBe """playlists
-                   |tracks
-                   |""".stripMargin
-  }
-
-  it should "render paginated table names" in {
-    val input = "show tables"
-    val client = mock[AmazonDynamoDB]
-    inSequence {
-      (client.listTables(_: ListTablesRequest))
-        .expects(new ListTablesRequest())
-        .returns(
-          new ListTablesResult()
-            .withLastEvaluatedTableName("playlists")
-            .withTableNames("playlists")
-        )
-      (client.listTables(_: ListTablesRequest))
-        .expects(new ListTablesRequest().withExclusiveStartTableName("playlists"))
-        .returns(
-          new ListTablesResult()
-            .withTableNames("tracks")
-        )
-    }
-
-    val (out, result) = captureStdOut {
-      Script(Opts(), input, client)
-    }
-    result.right.value
-    out shouldBe """playlists
-                   |tracks
-                   |""".stripMargin
-  }
-
-  it should "render an error when rendering table names fails" in {
-    val input = "show tables"
-    val client = mock[AmazonDynamoDB]
-    val error = "Error occurred while loading list of tables"
-    (client.listTables(_: ListTablesRequest))
-      .expects(new ListTablesRequest())
-      .throws(new Exception(error))
-    val (out, result) = captureStdOut {
-      Script(Opts(), input, client)
-    }
-    out shouldBe empty
-    result.left.value shouldBe error
-  }
+          .use { client =>
+            for {
+              _ <- insertRows(client)
+              () <- Script.eval(Opts(), input, client)
+              output <- TestConsole.output
+            } yield {
+              assert(output)(
+                equalTo(
+                  Vector(
+                    """id
+                  |"456"
+                  |""".stripMargin
+                  )
+                )
+              )
+            }
+          }
+      },
+      testM("render as json") {
+        val input = "select * from playlists limit 2"
+        withPlaylistTable.use {
+          client =>
+            for {
+              _ <- insertRows(client)
+              () <- Script.eval(Opts(format = Format.Json), input, client)
+              output <- TestConsole.output
+            } yield {
+              assert(output)(
+                equalTo(
+                  Vector(
+                    """{"id":"456"}
+                     |{"id":"123"}
+                     |""".stripMargin
+                  )
+                )
+              )
+            }
+        }
+      },
+      testM("render as json-pretty") {
+        withPlaylistTable.use {
+          client =>
+            val input = "select * from playlists limit 2"
+            for {
+              _ <- insertRows(client)
+              () <- Script.eval(Opts(format = Format.JsonPretty), input, client)
+              output <- TestConsole.output
+            } yield {
+              assert(output)(
+                equalTo(
+                  Vector(
+                    """{
+                      |  "id" : "456"
+                      |}
+                      |{
+                      |  "id" : "123"
+                      |}
+                      |""".stripMargin
+                  )
+                )
+              )
+            }
+        }
+      },
+      testM("render an error when parsing fails") {
+        val input = "select * from playlists limid"
+        dynamoClient.use {
+          client =>
+            for {
+              message <- Script
+                .eval(Opts(format = Format.JsonPretty), input, client)
+                .flip
+                .map(_.getMessage)
+            } yield {
+              assert(message)(
+                equalTo(
+                  """[error] Failed to parse query
+                     |select * from playlists limid
+                     |                        ^""".stripMargin
+                )
+              )
+            }
+        }
+      },
+      testM("render table names") {
+        withPlaylistTable
+          .flatMap(client =>
+            withTable("tracks")("id" -> ScalarAttributeType.S)(
+              client
+            ).as(client)
+          )
+          .use { client =>
+            val input = "show tables"
+            for {
+              () <- Script.eval(Opts(), input, client)
+              output <- TestConsole.output
+            } yield {
+              assert(output)(
+                equalTo(
+                  Vector(
+                    """playlists
+                  |tracks
+                  |""".stripMargin
+                  )
+                )
+              )
+            }
+          }
+      }
+//    testM("render paginated table names") {
+//      val input = "show tables"
+//      val (out, result) = captureStdOut {
+//        Script.eval(Opts(), input, client)
+//      }
+//      assert(result)(isRight(anything))
+//      assert(out)(
+//        equalTo(
+//          """playlists
+//          |tracks
+//          |""".stripMargin
+//        )
+//      )
+//    },
+      //TODO: pass client as layer to allow mocking errors
+//    test("render an error when rendering table names fails") {
+//      val input = "show tables"
+//      val error = "Error occurred while loading list of tables"
+//      Script.eval(Opts(), input, client)
+//      assert(result)(isLeft(equalTo(error)))
+//    }
+    ) @@ TestAspect.sequential
 
 }

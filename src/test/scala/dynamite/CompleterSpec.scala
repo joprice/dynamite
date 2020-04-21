@@ -1,39 +1,40 @@
 package dynamite
 
+import zio.test._
+import zio.test.Assertion._
+import zio.{Ref, Task}
 import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
-import dynamite.Response.{ KeySchema, TableDescription }
-import org.scalamock.scalatest.MockFactory
-import org.scalatest._
+import dynamite.Response.{KeySchema, TableDescription}
 
-import scala.util.{ Success, Try }
-
-class CompleterSpec
-  extends FlatSpec
-  with Matchers
-  with MockFactory
-  with OptionValues {
-
-  "table parser" should "parse a projection" in {
-    fastparse.parse("select * from tableName", Completer.tableParser(_)) should matchPattern {
-      case fastparse.Parsed.Success("tableName", _) =>
-    }
-  }
-
-  "table cache" should "cache table names" in {
-    val loader = mock[String => Try[TableDescription]]
-    (loader.apply _)
-      .expects("playlists")
-      .returns(Success(TableDescription(
+object CompleterSpec extends DefaultRunnableSpec {
+  def spec = suite("completer")(
+    test("parse a projection") {
+      assert(
+        fastparse
+          .parse("select * from tableName", Completer.tableParser(_))
+      ) {
+        equalTo(
+          fastparse.Parsed.Success("tableName", 23)
+        )
+      }
+    },
+    testM("cache table names") {
+      val table = TableDescription(
         "playlists",
         KeySchema("id", ScalarAttributeType.S),
         None,
         Seq.empty
-      )))
-      .noMoreThanOnce()
-
-    val cache = new TableCache(loader)
-    cache.get("playlists")
-    cache.get("playlists")
-  }
-
+      )
+      for {
+        ref <- Ref.make((_: String) => Task.succeed(table))
+        f2 = (_: String) => Task.fail(new Exception("fail")).orDie
+        f1 <- ref.get
+        loader = (input: String) => f1(input).tap(_ => ref.set(f2))
+        cache = new TableCache(loader)
+        value1 <- cache.get("playlists")
+        value2 <- cache.get("playlists")
+      } yield assert(value1)(isSome(equalTo(table))) &&
+        assert(value2)(isSome(equalTo(table)))
+    }
+  )
 }
