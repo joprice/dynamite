@@ -1,36 +1,37 @@
 package dynamite
 
 import java.io.File
-import zio.ZManaged
+import zio.{ZManaged, Task}
 import zio.test._
 import zio.test.Assertion._
 
 object DynamiteConfigSpec extends DefaultRunnableSpec {
 
-  def deleteFile(file: File): Unit = {
+  def deleteFile(file: File): Task[Unit] = {
     if (file.exists) {
-      val deleted = if (file.isFile) {
-        file.delete()
-      } else {
-        file.listFiles().foreach(deleteFile)
-        file.delete()
-      }
-      if (!deleted) {
-        throw new Exception(s"Failed to delee file $file")
-      }
-    }
+      for {
+        deleted <- if (file.isFile) {
+          Task(file.delete())
+        } else {
+          Task.foreach(file.listFiles())(deleteFile(_)) *> Task(file.delete())
+        }
+        () <- if (!deleted) {
+          Task.fail(new Exception(s"Failed to delee file $file"))
+        } else Task.unit
+      } yield ()
+    } else Task.unit
   }
 
   // based on https://github.com/robey/scalatest-mixins/blob/master/src/main/scala/com/twitter/scalatest/TestFolder.scala
   def tempDirectory[A] = {
-    ZManaged.makeEffect {
+    ZManaged.make(Task {
       val tempFolder = System.getProperty("java.io.tmpdir")
       var folder: File = null
       do {
         folder = new File(tempFolder, "scalatest-" + System.nanoTime)
       } while (!folder.mkdir())
       folder
-    } { folder => deleteFile(folder) }
+    }) { folder => deleteFile(folder).orDie }
   }
 
   def spec = suite("config")(

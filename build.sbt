@@ -117,7 +117,8 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ywarn-unused:patvars,-implicits",
   "-Ywarn-value-discard",
   "-Ybackend-parallelism", math.min(java.lang.Runtime.getRuntime.availableProcessors, 16).toString,
-  "-Ycache-plugin-class-loader:always"
+  "-Ycache-plugin-class-loader:always",
+  "-P:splain:keepmodules:1"
 )
 
 scalacOptions in (Test, compile) ++= (scalacOptions in (Compile, compile)).value
@@ -160,3 +161,13 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
+addCompilerPlugin("io.tryp" % "splain" % "0.5.3" cross CrossVersion.patch)
+
+// allows using unsafeRun for experimenting in console
+consoleQuick / initialCommands := """
+import zio._, zio.console._, zio.Runtime.default._
+"""
+
+console / initialCommands := (consoleQuick / initialCommands).value + """
+import dynamite._
+"""

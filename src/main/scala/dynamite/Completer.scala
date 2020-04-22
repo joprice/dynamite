@@ -1,16 +1,12 @@
 package dynamite
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
-
 import dynamite.Response.TableNames
 import jline.console.ConsoleReader
 import jline.console.completer._
 import Parser._
 import fastparse._
 import NoWhitespace._
-import zio.Task
-
-import scala.util.{Try}
 import scala.jdk.CollectionConverters._
 
 object Completer {
@@ -30,19 +26,19 @@ object Completer {
   def debug(s: String) =
     Files.write(path, (s + "\n").getBytes(), StandardOpenOption.APPEND)
 
-  class TableNamesCompleter(loadTables: => Try[TableNames])
-      extends StringsCompleter {
+  class TableNamesCompleter(
+      loadTables: TableNames
+  ) extends StringsCompleter {
     //TODO: refresh cache and only cache when not failed, since automatic or manual?
     lazy val tableNames = {
-      val names = loadTables
-        .map { tables =>
-          //TODO: warn on any page failure
-          tables.names.toList.flatMap(_.result.toOption).flatten.sorted
-        }
-        .getOrElse {
-          //TODO: warn that fetching tables failed
-          Seq.empty
-        }
+      val names = zio.Runtime.default
+        .unsafeRun(
+          loadTables.names.runCollect
+            .map { tables =>
+              //TODO: warn on any page failure
+              tables.flatMap(_.result).sorted
+            }
+        )
         .asJava
       super.getStrings.addAll(names)
       names
@@ -74,6 +70,7 @@ object Completer {
         case _                       => None
       }
     }.fold(Seq.empty[String]) { name =>
+      //TODO: pass runtime
       zio.Runtime.default
         .unsafeRun(
           tableCache
@@ -96,11 +93,9 @@ object Completer {
   def apply(
       reader: ConsoleReader,
       tableCache: TableCache,
-      showTables: => Task[TableNames]
+      showTables: TableNames
   ) = {
-    val tableNames = new TableNamesCompleter(
-      Try(zio.Runtime.default.unsafeRun(showTables))
-    )
+    val tableNames = new TableNamesCompleter(showTables)
     val fields = new FieldsCompleter(reader, tableCache)
 
     new AggregateCompleter(

@@ -2,7 +2,6 @@ package dynamite
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
-
 import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBAsync}
 import com.amazonaws.services.dynamodbv2.model.{
@@ -14,7 +13,7 @@ import com.amazonaws.services.dynamodbv2.model.{
   ScalarAttributeType
 }
 import zio.test.environment.TestConsole
-import zio.ZManaged
+import zio.{ZManaged, Task}
 import zio.test._
 import zio.test.Assertion._
 import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
@@ -33,24 +32,31 @@ object ScriptSpec extends DefaultRunnableSpec {
   def createTable(
       client: AmazonDynamoDB
   )(tableName: String)(attributes: (String, ScalarAttributeType)*) =
-    client.createTable(
-      attributeDefinitions(attributes),
-      tableName,
-      keySchema(attributes),
-      new ProvisionedThroughput(1L, 1L)
-    )
+    for {
+      key <- keySchema(attributes)
+      result <- Task(
+        client.createTable(
+          attributeDefinitions(attributes),
+          tableName,
+          key,
+          new ProvisionedThroughput(1L, 1L)
+        )
+      )
+    } yield result
 
   private def keySchema(attributes: Seq[(String, ScalarAttributeType)]) = {
     attributes.toList match {
-      case Nil => throw new Exception("Invalid key schema")
+      case Nil => Task.fail(new Exception("Invalid key schema"))
       case hashKeyWithType :: rangeKeyWithType =>
         val keySchemas =
           hashKeyWithType._1 -> KeyType.HASH :: rangeKeyWithType.map(
             _._1 -> KeyType.RANGE
           )
-        keySchemas.map {
-          case (symbol, keyType) => new KeySchemaElement(symbol, keyType)
-        }.asJava
+        Task.succeed(
+          keySchemas.map {
+            case (symbol, keyType) => new KeySchemaElement(symbol, keyType)
+          }.asJava
+        )
     }
   }
 
@@ -59,9 +65,9 @@ object ScriptSpec extends DefaultRunnableSpec {
   )(
       client: AmazonDynamoDB
   ) =
-    ZManaged.makeEffect {
+    ZManaged.make {
       createTable(client)(tableName)(attributeDefinitions: _*)
-    }(_ => client.deleteTable(tableName))
+    }(_ => Task(client.deleteTable(tableName)).orDie)
 
   val randomPort = {
     // arbitrary value to avoid common low number ports

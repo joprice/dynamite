@@ -13,10 +13,12 @@ import dynamite.Ast.Projection.FieldSelector.{All, Field}
 import dynamite.Response.{Index, KeySchema}
 import fansi.{Bold, Str}
 import jline.internal.Ansi
-import zio.{Task, ZManaged}
+import zio.{Task, ZIO, ZManaged}
 import zio.logging.Logging
+import zio.stream.ZStream
+import zio.test.environment.TestClock
+
 import scala.concurrent.duration._
-import scala.util.{Failure, Success}
 import scala.jdk.CollectionConverters._
 
 object ReplSpec extends DefaultRunnableSpec {
@@ -27,7 +29,7 @@ object ReplSpec extends DefaultRunnableSpec {
     )(_.close())
 
   def spec =
-    suite("eval")(
+    suite("repl")(
       testM("tolerate failed responses") {
         val query = s"select * from playlists limit 1;"
         val writer = new StringWriter()
@@ -91,22 +93,22 @@ object ReplSpec extends DefaultRunnableSpec {
                 _ =>
                   Task.succeed(
                     Response.ResultSet(
-                      Iterator(
+                      ZStream(
                         Timed(
-                          Success(List {
+                          List {
                             Map(
                               "id" -> new AttributeValue().withS("abc"),
                               "size" -> new AttributeValue().withN("2")
                             )
-                          }),
+                          },
                           1.second
                         ),
-                        Timed(Success(List {
+                        Timed(List {
                           Map(
                             "id" -> new AttributeValue().withS("def"),
                             "size" -> new AttributeValue().withN("2")
                           )
-                        }), 1.second)
+                        }, 1.second)
                       )
                     )
                   )
@@ -143,7 +145,7 @@ object ReplSpec extends DefaultRunnableSpec {
                 case _: Ast.Select =>
                   Task.succeed(
                     Response.ResultSet(
-                      Iterator.empty
+                      ZStream.empty
                     )
                   )
                 case _ => ???
@@ -154,7 +156,7 @@ object ReplSpec extends DefaultRunnableSpec {
             assert(Ansi.stripAnsi(writer.toString))(equalTo(""))
           )
       },
-      testM("handle failing pagination") {
+      testM("handle failed pagination") {
         val writer = new StringWriter()
         val query = s"select * from playlists where userId = 'user-id-1';"
         withReader(query)
@@ -168,14 +170,16 @@ object ReplSpec extends DefaultRunnableSpec {
                 _ =>
                   Task.succeed(
                     Response.ResultSet(
-                      Iterator(
-                        Timed(Success(List {
-                          Map(
-                            "id" -> new AttributeValue().withS("abc"),
-                            "size" -> new AttributeValue().withN("2")
-                          )
-                        }), 1.second),
-                        Timed(Failure(new Exception("second page failed")))
+                      ZStream.fromEffect(
+                        ZIO
+                          .succeed(Timed(List {
+                            Map(
+                              "id" -> new AttributeValue().withS("abc"),
+                              "size" -> new AttributeValue().withN("2")
+                            )
+                          }, 1.second))
+                      ) ++ ZStream.fromEffect(
+                        Task.fail(new Exception("second page failed"))
                       )
                     )
                   )
@@ -183,12 +187,12 @@ object ReplSpec extends DefaultRunnableSpec {
           }
           .as(
             assert(Ansi.stripAnsi(writer.toString))(
+              //TODO: restore press any key output here (handle "hasNext" in ZStream)
               equalTo(
                 s"""id      size
            |"abc"   2
            |
            |Completed in 1000 ms
-           |Press q to quit, any key to load next page.
            |[error] second page failed
            |""".stripMargin
               )
@@ -212,13 +216,13 @@ object ReplSpec extends DefaultRunnableSpec {
               format, { _ =>
                 Task.succeed(
                   Response.ResultSet(
-                    Iterator(
-                      Timed(Success(List {
+                    ZStream(
+                      Timed(List {
                         Map(
                           "id" -> new AttributeValue().withS("abc"),
                           "size" -> new AttributeValue().withN("2")
                         )
-                      }), 1.second)
+                      }, 1.second)
                     )
                   )
                 )
@@ -254,13 +258,13 @@ object ReplSpec extends DefaultRunnableSpec {
               _ =>
                 Task.succeed(
                   Response.ResultSet(
-                    Iterator.single(
+                    ZStream(
                       Timed(
-                        Success(List {
+                        List {
                           Map(
                             "count" -> new AttributeValue().withN("20")
                           )
-                        }),
+                        },
                         1.second
                       )
                     )
@@ -458,27 +462,26 @@ object ReplSpec extends DefaultRunnableSpec {
       testM("show tables should render a list of tables") {
         val query = "show tables;"
         withReader(query)
-          .use {
-            reader =>
-              val writer = new StringWriter()
-              Repl
-                .loop(
-                  "",
-                  new PrintWriter(writer),
-                  reader,
-                  Ast.Format.Tabular, {
-                    case ShowTables =>
-                      Task.succeed(
-                        Response.TableNames(
-                          Iterator.single(
-                            Timed(Success(List("playlists")), 1.second)
-                          )
+          .use { reader =>
+            val writer = new StringWriter()
+            Repl
+              .loop(
+                "",
+                new PrintWriter(writer),
+                reader,
+                Ast.Format.Tabular, {
+                  case ShowTables =>
+                    Task.succeed(
+                      Response.TableNames(
+                        ZStream(
+                          Timed(List("playlists"), 1.second)
                         )
                       )
-                    case _ => ???
-                  }
-                )
-                .as(writer.toString)
+                    )
+                  case _ => ???
+                }
+              )
+              .as(writer.toString)
           }
           .map(out =>
             assert(Ansi.stripAnsi(out))(
@@ -532,5 +535,5 @@ object ReplSpec extends DefaultRunnableSpec {
           )
         )
       )
-    ).provideSomeLayer(Logging.ignore) @@ TestAspect.sequential
+    ).provideSomeLayer(Logging.ignore ++ TestClock.default) @@ TestAspect.sequential
 }
