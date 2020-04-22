@@ -2,7 +2,10 @@ package dynamite
 
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import dynamite.Ast.{Query, ReplCommand}
-import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType
+import com.amazonaws.services.dynamodbv2.model.{
+  ResourceNotFoundException,
+  ScalarAttributeType
+}
 import dynamite.Eval.{
   AmbiguousIndexException,
   InvalidHashKeyException,
@@ -466,7 +469,37 @@ object EvalSpec extends DefaultRunnableSpec {
         assertM(run(s"describe table non-existent-table"))(
           equalTo(Response.Info("No table exists with name non-existent-table"))
         )
-      }
+      },
+      testM("bubble up loading error")(
+        assertM(
+          Eval
+            .assumeIndex(
+              tableCache =
+                new TableCache(_ => Task.fail(new Exception("fail"))),
+              tableName = "users",
+              hashKey = "userId",
+              rangeKey = Some("id"),
+              orderBy = None
+            )
+            .flip
+            .map(_.getMessage)
+        )(equalTo("fail"))
+      ),
+      testM("tolerate missing table")(
+        assertM(
+          Eval
+            .assumeIndex(
+              tableCache = new TableCache(_ =>
+                Task.fail(new ResourceNotFoundException("unknown table"))
+              ),
+              tableName = "users",
+              hashKey = "userId",
+              rangeKey = Some("id"),
+              orderBy = None
+            )
+            .flip
+        )(equalTo(UnknownTableException("users")))
+      )
 //
 //        test ("lazy iterator" should "iterate once") {
 //          var i = 0

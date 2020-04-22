@@ -53,9 +53,9 @@ object Eval {
     for {
       table <- tableCache
         .get(tableName)
-        .fold(
-          error => throw error,
-          table => table.getOrElse(throw UnknownTableException(tableName))
+        .foldM(
+          error => Task.fail(error),
+          table => table.map(Task.succeed(_)).getOrElse(Task.fail(UnknownTableException(tableName)))
         )
       result <- {
         val grouped = table.indexes.groupBy(_.hash.name)
