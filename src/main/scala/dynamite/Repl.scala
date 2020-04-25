@@ -15,10 +15,8 @@ import zio.logging.Logging
 import scala.concurrent.duration._
 import dynamite.Ast._
 import dynamite.Parser.ParseException
-import dynamite.Response.KeySchema
+import dynamite.Response.{KeySchema, Paged, ResultPage}
 import fansi._
-
-import scala.util.{Failure, Success, Try}
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.auth.AWSCredentialsProvider
 import zio._
@@ -28,11 +26,12 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsyncClientBuilder
 import java.io.{Closeable, File, PrintWriter, StringWriter}
 
+import zio.clock.Clock
+import zio.stream.ZStream
+
 import scala.jdk.CollectionConverters._
 
 object Repl {
-
-  type ResultPage = Paging[Timed[Try[PageType]]]
 
   def printTableDescription(
       out: PrintWriter,
@@ -79,70 +78,96 @@ object Repl {
     out.println(output)
   }
 
-  def handlePage[A, B](
+  def handlePage[R, A](
       out: PrintWriter,
-      page: Paging.Page[Timed[Try[A]]],
+      page: Paged[R, A],
       reader: Reader
-  )(process: A => B): Paging[Timed[Try[A]]] = {
-    val Lazy(Timed(value, duration)) = page.data
-    value match {
-      case Success(values) =>
-        //TODO: if results is less than page size, finish early?
-        process(values)
-        out.println(s"Completed in ${duration.toMillis} ms")
-        //TODO: do this next iteration?
-        val nextPage = page.next()
-        nextPage match {
-          case Paging.EOF => reader.resetPagination()
-          case _          => out.println("Press q to quit, any key to load next page.")
+  )(process: A => RIO[R, Any]): RIO[R, Paged[R, A]] = {
+    page.runHead
+      .foldM(
+        { error =>
+          //        //TODO: if results is less than page size, finish early?
+          //      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
+          Task {
+            val message =
+              Option(error.getMessage)
+                .getOrElse("Failed loading page")
+            reader.resetPagination()
+            //ex.printStackTrace()
+            //println(s"$ex ${ex.getClass} ${ex.getCause}")
+            //TODO: file error logger
+            out.println(formatError(message))
+            ZStream.empty
+          }
+        }, {
+          case Some(Timed(values, duration)) =>
+            for {
+              _ <- process(values)
+              _ <- ZIO {
+                out.println(s"Completed in ${duration.toMillis} ms")
+              }
+              //TODO: do this next iteration?
+              tail = page.drop(1)
+              result <- tail.runHead
+                .catchAll(_ => Task.succeed(None))
+                .flatMap {
+                  case Some(element) =>
+                    ZIO(
+                      out.println("Press q to quit, any key to load next page.")
+                    ) *> ZIO
+                      .succeed(ZStream(element) ++ tail.drop(1))
+                  case None =>
+                    ZIO
+                      .succeed(tail)
+                }
+            } yield result
+          case None => ZIO.succeed(ZStream.empty)
         }
-        nextPage
-      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
-      case Failure(ex) =>
-        reader.resetPagination()
-        //ex.printStackTrace()
-        //println(s"$ex ${ex.getClass} ${ex.getCause}")
-        //TODO: file error logger
-        out.println(formatError(ex.getMessage))
-        Paging.EOF
-    }
+      )
   }
 
   def renderPage(
       out: PrintWriter,
       reader: Reader,
       format: Ast.Format,
-      paging: Paging.Page[Timed[Try[PageType]]]
-  ): ResultPage = {
+      paging: ResultPage
+  ): RIO[Clock, ResultPage] = {
     reader.clearPrompt()
     reader.disableEcho()
 
-    handlePage(out, paging, reader) {
+    handlePage[Clock, PageType](out, paging, reader) {
       case PageType.TablePaging(select, values) =>
         //TODO: offer vertical printing method
         format match {
           case Ast.Format.Json =>
             //TODO: paginate json output to avoid flooding terminal
-            values.foreach { value =>
-              out.println(Script.printDynamoObject(value, pretty = true))
-            }
+            Task
+              .foreach(values) { value =>
+                Script
+                  .printDynamoObject(value, pretty = true)
+                  .flatMap { value => Task(out.println(value)) }
+              }
           case Ast.Format.Tabular =>
-            out.print(
-              render(
-                values,
-                select.projection,
-                width = Some(reader.terminalWidth)
+            Task {
+              out.print(
+                render(
+                  values,
+                  select.projection,
+                  width = Some(reader.terminalWidth)
+                )
               )
-            )
+            }
         }
       case PageType.TableNamePaging(tableNames) =>
-        out.println(
-          Table(
-            headers = Seq("name"),
-            data = tableNames.map(name => Seq(Str(name))),
-            None
+        Task {
+          out.println(
+            Table(
+              headers = Seq("name"),
+              data = tableNames.map(name => Seq(Str(name))),
+              None
+            )
           )
-        )
+        }
     }
   }
 
@@ -150,33 +175,29 @@ object Repl {
       out: PrintWriter,
       reader: Reader,
       format: Ast.Format,
-      results: ResultPage
-  ): Unit = {
-    try {
-      results match {
-        case Paging.EOF =>
-        case page @ Paging.Page(_, _) =>
-          val paging = renderPage(out, reader, format, page)
-          out.flush()
-          paging match {
-            case Paging.EOF =>
-            case _          =>
-              // While paging, a single char is read so that a new line is not required to
-              // go the next page, or quit the pager
-              val line = reader.readCharacter().toChar.toString
-              if (line != null) {
-                val trimmed = line.trim
-                // q is used to quit pagination
-                if (trimmed != "q") {
-                  paginate(out, reader, format, paging)
-                }
-              }
-          }
+      page: ResultPage
+  ): RIO[Clock, Unit] = {
+    for {
+      paging <- renderPage(out, reader, format, page)
+      () <- Task(out.flush())
+      result <- paging.runHead.flatMap {
+        case None    => Task.unit
+        case Some(_) =>
+          // While paging, a single char is read so that a new line is not required to
+          // go the next page, or quit the pager
+          val line = reader.readCharacter().toChar.toString
+          if (line != null) {
+            val trimmed = line.trim
+            // q is used to quit pagination
+            if (trimmed != "q") {
+              paginate(out, reader, format, paging)
+            } else Task.unit
+          } else Task.unit
       }
-    } finally {
-      reader.resetPagination()
-    }
-  }
+    } yield result
+  }.ensuring(ZIO {
+    reader.resetPagination()
+  }.orDie)
 
   def report(
       out: PrintWriter,
@@ -184,17 +205,15 @@ object Repl {
       format: Ast.Format,
       query: Ast.Command,
       results: Response
-  ): Unit = (query, results) match {
+  ): RIO[Clock, Unit] = (query, results) match {
     case (select: Ast.Select, Response.ResultSet(resultSet, _)) =>
       // TODO: completion: success/failure, time, result count, indicate empty?
       //TODO: add flag with query cost
-      paginate(out, reader, format, Paging.fromIterator(resultSet.map { page =>
+      paginate(out, reader, format, resultSet.map { page =>
         page.copy(
-          result = page.result.map { value =>
-            PageType.TablePaging(select, value)
-          }
+          result = PageType.TablePaging(select, page.result)
         )
-      }))
+      })
     //  PageType.TablePaging(select, resultSet))
     //      capacity.flatMap(value => Option(value())).foreach { cap =>
     //        println(
@@ -205,21 +224,22 @@ object Repl {
     //               |${cap.getLocalSecondaryIndexes}""".stripMargin
     //        )
     //      }
-    case (_: Ast.Update, Response.Complete) =>
+    case (_: Ast.Update, Response.Complete) => Task.unit
     //TODO: output for update / delete /ddl
     case (ShowTables, Response.TableNames(resultSet)) =>
-      paginate(out, reader, format, Paging.fromIterator(resultSet.map { page =>
+      paginate(out, reader, format, resultSet.map { page =>
         page.copy(
-          result = page.result.map(PageType.TableNamePaging)
+          result = PageType.TableNamePaging(page.result)
         )
-      }))
+      })
     case (_: DescribeTable, description: Response.TableDescription) =>
-      printTableDescription(out, description)
+      Task(printTableDescription(out, description))
     case (_, Response.Info(message)) =>
-      out.println(message)
+      Task(out.println(message))
     case (_: Insert, _) =>
+      Task.unit
     case unhandled =>
-      out.println(Color.Yellow(s"[warn] unhandled response $unhandled"))
+      Task(out.println(Color.Yellow(s"[warn] unhandled response $unhandled")))
   }
 
   final def loop(
@@ -228,7 +248,7 @@ object Repl {
       reader: Reader,
       format: Ast.Format,
       eval: Ast.Query => Task[Response]
-  ): RIO[Logging, Unit] = {
+  ): RIO[Logging with Clock, Unit] = {
     val line = reader.readLine()
 
     if (line != null) {
@@ -254,28 +274,28 @@ object Repl {
                   out.println(format)
                   ZIO.succeed(format)
                 case SetFormat(format) =>
-                  //Success(Response.Info(s"Format set to $format"))
                   out.println(s"Format set to $format")
                   ZIO.succeed(format)
                 case query: Query =>
                   eval(query)
                     .foldM(
                       { ex =>
-                        val msg = Option(ex.getMessage)
-                          .getOrElse("An unknown error occurred")
-                        out.println(formatError(msg))
-                        Task.unit
+                        Task {
+                          val msg = Option(ex.getMessage)
+                            .getOrElse("An unknown error occurred")
+                          out.println(formatError(msg))
+                        }
                       //TODO: log throwable when verbose flag?
                       //log.throwable("Failed running query", ex)
                       }, { results =>
-                        Task(
-                          report(out, reader, format, query, results)
-                        ).catchAll { error =>
-                          val msg = Option(error.getMessage)
-                            .getOrElse("An unknown error occurred")
-                          out.println(formatError(msg))
-                          Task.unit
-                        }
+                        report(out, reader, format, query, results)
+                          .catchAll { error =>
+                            Task {
+                              val msg = Option(error.getMessage)
+                                .getOrElse("An unknown error occurred")
+                              out.println(formatError(msg))
+                            }
+                          }
                       }
                     )
                     .as(format)
@@ -283,8 +303,10 @@ object Repl {
             )
             .map { newFormat => ("", true, newFormat) }
         } else {
-          reader.setPrompt(Bold.On(Str("  -> ")).render)
-          Task.succeed((s"$buffer\n$line", true, format))
+          Task {
+            reader.setPrompt(Bold.On(Str("  -> ")).render)
+            (s"$buffer\n$line", true, format)
+          }
         }
         _ = out.flush()
         () <- if (continue) {
@@ -296,11 +318,10 @@ object Repl {
 
   def apply(
       opts: Opts
-  ): ZIO[Console with Config[DynamiteConfig] with Logging, Throwable, Unit] =
+  ): ZIO[Console with Config[DynamiteConfig] with Logging with Clock, Throwable, Unit] =
     Script.withClient(opts).use { client =>
       for {
         config <- ZIO.access[Config[DynamiteConfig]](_.get)
-        // client = new Lazy(dynamoClient(config, opts))
         result <- run(client, config)
       } yield result
     }
@@ -324,7 +345,7 @@ object Repl {
             val tableCache = new TableCache(Eval.describeTable(client, _))
 
             def run(query: Ast.Query) =
-              Eval(client, query, config.pageSize, tableCache)
+              Eval(client, query, tableCache, pageSize = config.pageSize)
 
             val jLineReader = new JLineReader(reader)
             jLineReader.resetPrompt()
@@ -355,9 +376,7 @@ object Repl {
       data: Seq[DynamoObject]
   ): Seq[String] = {
     select.flatMap {
-      case FieldSelector.All =>
-        data.flatMap(_.keys).distinct.sorted
-      //data.flatMap(_.fieldNames().asScala).distinct.sorted
+      case FieldSelector.All           => data.flatMap(_.keys).distinct.sorted
       case FieldSelector.Field(field)  => Seq(field)
       case count: Aggregate.Count.type => Seq(count.name)
     }

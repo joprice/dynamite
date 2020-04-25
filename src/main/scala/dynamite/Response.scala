@@ -1,25 +1,31 @@
 package dynamite
 
+import zio.stream.ZStream
 import com.amazonaws.services.dynamodbv2.model.{
   ConsumedCapacity,
   ScalarAttributeType
 }
 import dynamite.Dynamo.DynamoObject
-
-import scala.util.Try
+import zio.{RIO, Task}
+import zio.clock.Clock
 
 sealed abstract class Response
 
 object Response {
+
+  type Paged[R, A] = ZStream[R, Throwable, Timed[A]]
+  type ResultPage = Paged[Clock, PageType]
+
   final case class Info(message: String) extends Response
 
   final case class ResultSet(
-      results: Iterator[Timed[Try[List[DynamoObject]]]],
-      capacity: Option[() => ConsumedCapacity] = None
+      results: Paged[Clock, List[DynamoObject]],
+      capacity: RIO[Clock, Option[() => ConsumedCapacity]] = Task.succeed(None)
   ) extends Response
 
-  final case class TableNames(names: Iterator[Timed[Try[List[String]]]])
-      extends Response
+  final case class TableNames(
+      names: Paged[Clock, List[String]]
+  ) extends Response
 
   sealed trait TableSchema {
     def name: String

@@ -17,6 +17,7 @@ import dynamite.Eval.{
 }
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
 import play.api.libs.json.{JsValue, Json}
+import zio.clock.Clock
 import zio.random.Random
 import zio.{Has, Task, ZIO, ZLayer, ZManaged}
 import zio.test.{TestAspect, _}
@@ -55,7 +56,7 @@ object EvalSpec extends DefaultRunnableSpec {
       .use { client =>
         val tableCache = new TableCache(Eval.describeTable(client, _))
         ZIO.fromEither(Parser.parse(query)).flatMap {
-          case result: Query => Eval(client, result, 20, tableCache)
+          case result: Query => Eval(client, result, tableCache, pageSize = 20)
           case _: ReplCommand =>
             Task.fail(new Exception("Invalid command type"))
         }
@@ -65,23 +66,19 @@ object EvalSpec extends DefaultRunnableSpec {
   def validate(
       query: String,
       expected: List[List[JsValue]]
-  ): ZIO[Random with DynamoClient, Throwable, TestResult] =
+  ): ZIO[Random with DynamoClient with Clock, Throwable, TestResult] =
     run(query)
       .flatMap {
         case Response.ResultSet(pages, _) =>
-          ZIO
-            .foreach(pages.toList) { page =>
-              val result = page.result
-//              result.failed.foreach { error =>
-//                println(s"query '$query' failed: $error")
-//              }
-              ZIO.fromTry(result)
-            }
-            .map { result =>
-              val parsed = result.map {
-                _.map(json => Script.dynamoObjectToJson(json))
+          pages
+            .mapM { page =>
+              Task.foreach(page.result) { json =>
+                Script.dynamoObjectToJson(json)
               }
-              assert(parsed)(equalTo(expected))
+            }
+            .runCollect
+            .map {
+              assert(_)(equalTo(expected))
             }
         case _ => Task.fail(new Exception("Invalid result"))
       }
@@ -89,7 +86,6 @@ object EvalSpec extends DefaultRunnableSpec {
   def spec =
     suite("eval")(
       testM("select all records from dynamo") {
-//        tables.use_ {
         validate(
           s"select id, name from $tableName",
           List(
@@ -101,7 +97,6 @@ object EvalSpec extends DefaultRunnableSpec {
             )
           )
         )
-//        }
       },
       testM("allow selecting all fields") {
         validate(s"select * from $tableName", List(Seed.seedData))
@@ -333,7 +328,7 @@ object EvalSpec extends DefaultRunnableSpec {
         assertM(
           run(
             s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
-          ).flip
+          ).tap(value => zio.console.putStrLn(s"!!!!!!!!!! $value")).flip
         )(
           equalTo(
             InvalidHashKeyException(
@@ -418,7 +413,7 @@ object EvalSpec extends DefaultRunnableSpec {
           run(
             s"select count(*) from $tableName where userId = 'user-id-1'"
           ).flatMap {
-            case ResultSet(_, capacity) => Task.succeed(capacity)
+            case ResultSet(_, capacity) => capacity
             case _                      => Task.fail(new Exception("Unexpected result"))
           }
         )(isSome(anything))
@@ -500,16 +495,6 @@ object EvalSpec extends DefaultRunnableSpec {
             .flip
         )(equalTo(UnknownTableException("users")))
       )
-//
-//        test ("lazy iterator" should "iterate once") {
-//          var i = 0
-//          val it = Eval.LazySingleIterator(i += 1)
-//          it.hasNext shouldBe true
-//          it.next()
-//          it.hasNext shouldBe false
-//          a[NoSuchElementException] should be thrownBy it.next()
-//          i shouldBe 1
-//        }
     ) @@ TestAspect.sequential @@ TestAspect.aroundTest(
       createTables
         .map(_ => ZIO.succeed(_: TestSuccess))

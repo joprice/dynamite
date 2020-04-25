@@ -2,8 +2,6 @@ package dynamite
 
 import dynamite.Ast.{Format => _, _}
 import jline.internal.Ansi
-
-import scala.util.Try
 import zio._
 import zio.config.Config
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
@@ -20,92 +18,89 @@ import play.api.libs.json.{
   JsValue,
   Json
 }
+import zio.clock.Clock
 
 import scala.jdk.CollectionConverters._
 
 object Script {
 
   // paginate through the results, exiting at the first failure and printing as each page is processed
-  def render[A](
-      data: Iterator[Timed[Try[List[A]]]]
-  )(f: (Seq[A], Boolean) => String): RIO[Console, Unit] = {
+  def render[R1, E, A](
+      data: ZStream[R1, E, Timed[List[A]]]
+  )(
+      f: (Seq[A], Boolean) => ZIO[Any, E, String]
+  ): ZIO[R1 with Console, E, Unit] =
     // paginate through the results, exiting at the first failure and printing as each page is processed
-//    var first = true
-//    var result = ZIO.unit
-    ZStream
-      .fromIterator(ZIO.succeed(data))
-      .mapM(item => ZIO.fromTry(item.result))
-      .mapM { data => putStrLn(f(data, false)) }
+    data
+      .mapM(item => f(item.result, false))
+      .mapM(putStrLn(_))
       .runDrain
-//    while (result.isRight && data.hasNext) {
-//      data.next().result match {
-//        case Success(values) =>
-//          val output = f(values, first)
-//          putStrLn(output)
-//          result = Right(())
-//        case Failure(ex) =>
-//          result = Left(ex.getMessage)
-//      }
-//      first = false
-//    }
-//    result
-  }
 
   def renderPage(
       format: Format,
       values: Seq[DynamoObject],
       projection: Seq[Ast.Projection],
       withHeaders: Boolean
-  ) = format match {
+  ): Task[String] = format match {
     case Format.Tabular =>
-      Ansi
-        .stripAnsi(
-          Repl.render(
-            values,
-            projection,
-            withHeaders,
-            align = false
+      Task.succeed(
+        Ansi
+          .stripAnsi(
+            Repl.render(
+              values,
+              projection,
+              withHeaders,
+              align = false
+            )
           )
-        )
-        .trim
+          .trim
+      )
     case Format.Json =>
-      values
-        .map(dynamoObjectToJson)
-        .mkString("\n")
+      Task
+        .foreach(values)(dynamoObjectToJson)
+        .map(_.mkString("\n"))
     case Format.JsonPretty =>
-      values
-        .map(dynamoObjectToJson)
-        .map(Json.prettyPrint)
-        .mkString("\n")
+      Task
+        .foreach(values)(dynamoObjectToJson)
+        .map(_.map(result => Json.prettyPrint(result)).mkString("\n"))
   }
 
-  def printDynamoObject(value: DynamoObject, pretty: Boolean) = {
-    val json = dynamoObjectToJson(value)
-    if (pretty) Json.prettyPrint(json) else Json.stringify(json)
-  }
+  def printDynamoObject(value: DynamoObject, pretty: Boolean) =
+    for {
+      json <- dynamoObjectToJson(value)
+    } yield if (pretty) Json.prettyPrint(json) else Json.stringify(json)
 
-  def attributeValueToJson(value: AttributeValue): JsValue =
+  def attributeValueToJson(value: AttributeValue): Task[JsValue] =
     Option(value.getBOOL)
       .map(JsBoolean(_))
       .orElse(Option(value.getS).map(JsString))
       .orElse(Option(value.getN).map(value => JsNumber(BigDecimal(value))))
-      .orElse(Option(value.getL).map { value =>
-        JsArray(value.asScala.map { item => attributeValueToJson(item) })
-      })
+      .map(Task.succeed(_))
       .orElse(Option(value.getM).map { value =>
         dynamoObjectToJson(value.asScala.toMap)
       })
+      .orElse(Option(value.getL).map { value =>
+        Task
+          .foreach(value.asScala) { item => attributeValueToJson(item) }
+          .map(JsArray(_))
+      })
       .getOrElse {
-        throw new Exception(s"Failed handling value $value")
+        Task.fail(new Exception(s"Failed handling value $value"))
       }
 
-  def dynamoObjectToJson(value: DynamoObject): JsValue =
-    JsObject(value.view.mapValues(attributeValueToJson).toSeq)
+  def dynamoObjectToJson(value: DynamoObject): Task[JsValue] =
+    Task
+      .foreach(value) {
+        case (key, value) =>
+          attributeValueToJson(value).map(key -> _)
+      }
+      .map {
+        JsObject(_)
+      }
 
   def withClient[A](opts: Opts) =
     ZManaged.make {
       for {
-        // config <- Repl.loadConfig(opts)
         config <- ZIO.access[Config[DynamiteConfig]](_.get)
       } yield Repl.dynamoClient(config, opts)
     }(client => ZIO.effectTotal(client.shutdown()))
@@ -114,14 +109,14 @@ object Script {
   def apply(
       opts: Opts,
       input: String
-  ): ZIO[Config[DynamiteConfig] with Console, Throwable, Unit] =
+  ): ZIO[Config[DynamiteConfig] with Console with Clock, Throwable, Unit] =
     withClient(opts).use { client => eval(opts, input, client) }
 
   def eval(
       opts: Opts,
       input: String,
       client: AmazonDynamoDBAsync
-  ): ZIO[Console, Throwable, Unit] =
+  ): ZIO[Console with Clock, Throwable, Unit] =
     Parser
       .parse(input.trim.stripSuffix(";"))
       .fold(
@@ -132,7 +127,7 @@ object Script {
         }, {
           case query: Query =>
             val tables = new TableCache(Eval.describeTable(client, _))
-            Eval(client, query, 20, tables).flatMap {
+            Eval(client, query, tables, pageSize = 20).flatMap {
               results =>
                 (query, results) match {
                   case (select: Ast.Select, Response.ResultSet(pages, _)) =>
@@ -146,7 +141,9 @@ object Script {
                     }
                   case (ShowTables, Response.TableNames(names)) =>
                     //TODO: format tables output
-                    render(names) { (page, _) => page.mkString("\n") }
+                    render(names) { (page, _) =>
+                      Task.succeed(page.mkString("\n"))
+                    }
                   //TODO: print update/delete success/failure
                   case (DescribeTable(_), Response.TableNames(_)) =>
                     Task.unit
@@ -158,7 +155,6 @@ object Script {
                   case unhandled =>
                     Task.fail(new Exception(s"unhandled response $unhandled"))
                 }
-              // case Failure(ex) => Left(ex.getMessage)
             }
           case _: ReplCommand =>
             Task.fail(
