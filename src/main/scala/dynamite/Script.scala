@@ -43,14 +43,14 @@ object Script {
       withHeaders: Boolean
   ): Task[String] = format match {
     case Format.Tabular =>
-        Repl.render(
+      Repl
+        .render(
           values,
           projection,
           withHeaders,
           align = false
-        ).map { result =>
-        Ansi .stripAnsi(result) .trim
-        }
+        )
+        .map(result => Ansi.stripAnsi(result).trim)
     case Format.Json =>
       Task
         .foreach(values)(dynamoObjectToJson)

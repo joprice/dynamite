@@ -399,11 +399,9 @@ object Repl {
       .map(Task.succeed(_))
       .orElse(Option(value.getM).map { value =>
         renderRow(value.asScala.toMap)
-        .map(_.map {
+          .map(_.map {
             case (key, value) => s""""$key": $value"""
-          }
-          .mkString("{", ", ", "}")
-          )
+          }.mkString("{", ", ", "}"))
       })
       .orElse(
         Option(value.getL)
@@ -421,9 +419,12 @@ object Repl {
       .getOrElse(Task.fail(new Exception(s"Failed to render $value")))
 
   def renderRow(item: DynamoObject): Task[Map[String, String]] =
-    ZIO.foreach(item) { case (key, value) =>
-      renderAttribute(value).map(key -> _)
-    }.map(_.toMap)
+    ZIO
+      .foreach(item) {
+        case (key, value) =>
+          renderAttribute(value).map(key -> _)
+      }
+      .map(_.toMap)
 
   //TODO: when projecting all fields, show hash/sort keys first?
   def render(
@@ -438,7 +439,7 @@ object Repl {
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
     val body = ZIO.foreach(list) { item =>
-      renderRow(item).map {  data =>
+      renderRow(item).map { data =>
         // missing fields are represented by an empty str
         headers.map(header => Str(truncate(data.getOrElse(header, ""))))
       }
