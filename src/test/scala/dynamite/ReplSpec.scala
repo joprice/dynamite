@@ -535,5 +535,5 @@ object ReplSpec extends DefaultRunnableSpec {
           )
         )
       )
-    ).provideSomeLayer(Logging.ignore ++ TestClock.default) @@ TestAspect.sequential
+    ).provideSomeLayer(Logging.ignore ++ TestClock.default ++ Dynamo.live) @@ TestAspect.sequential
 }

@@ -12,18 +12,21 @@ import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 import dynamite.Response._
 import scala.jdk.CollectionConverters._
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
+import dynamite.Dynamo.Dynamo
 import zio._
 import zio.clock.Clock
 import zio.stream.ZStream
 
 object Eval {
 
+  type Env = Clock with Dynamo.Dynamo
+
   def apply(
       dynamo: AmazonDynamoDBAsync,
       query: Query,
-      tableCache: TableCache,
+      tableCache: TableCache[Dynamo],
       pageSize: Int
-  ): Task[Response] =
+  ): RIO[Dynamo.Dynamo, Response] =
     query match {
       case query: Select =>
         select(dynamo, query, pageSize, tableCache)
@@ -38,12 +41,12 @@ object Eval {
     }
 
   def assumeIndex(
-      tableCache: TableCache,
+      tableCache: TableCache[Dynamo],
       tableName: String,
       hashKey: String,
       rangeKey: Option[String],
       orderBy: Option[OrderBy]
-  ): Task[Option[Index]] =
+  ): RIO[Dynamo, Option[Index]] =
     for {
       table <- tableCache
         .get(tableName)
@@ -208,7 +211,7 @@ object Eval {
     }
 
   //TODO: use UnknownTableException
-  def recoverQuery[A](table: String, result: Task[A]) =
+  def recoverQuery[R, A](table: String, result: RIO[Dynamo, A]) =
     result.mapError {
       case _: ResourceNotFoundException =>
         new Exception(s"Table '$table' does not exist")
@@ -261,7 +264,7 @@ object Eval {
   def describeTable(
       dynamo: AmazonDynamoDBAsync,
       tableName: String
-  ): Task[TableDescription] =
+  ): RIO[Dynamo, TableDescription] =
     for {
       result <- Dynamo.describeTable(dynamo, tableName)
     } yield {
@@ -329,7 +332,7 @@ object Eval {
   def insert(
       dynamo: AmazonDynamoDBAsync,
       query: Insert
-  ): Task[Complete.type] = {
+  ): RIO[Dynamo, Complete.type] = {
     val item = query.values
       .foldLeft(Map[String, AttributeValue]()) {
         case (item, (field, value)) =>
@@ -345,13 +348,14 @@ object Eval {
   def delete(
       dynamo: AmazonDynamoDBAsync,
       query: Delete
-  ): Task[Complete.type] = {
+  ): RIO[Dynamo, Complete.type] = {
     //TODO: optionally return consumed capacity
     //.getConsumedCapacity
     val Key(hashKey, hashValue) = query.key.hash
     val range = query.key.range.map {
       case Key(rangeKey, rangeValue) => (rangeKey, toAttributeValue(rangeValue))
     }
+    //TODO: timed
     Dynamo
       .deleteItem(
         dynamo,
@@ -366,7 +370,7 @@ object Eval {
   def update(
       dynamo: AmazonDynamoDBAsync,
       query: Update
-  ): Task[Complete.type] =
+  ): RIO[Dynamo, Complete.type] =
     recoverQuery(
       query.table, {
         val Key(hashKey, hashValue) = query.key.hash
@@ -391,15 +395,15 @@ object Eval {
       dynamo: AmazonDynamoDBAsync,
       query: Select,
       pageSize: Int,
-      tableCache: TableCache
-  ): Task[ResultSet] = {
+      tableCache: TableCache[Dynamo]
+  ): RIO[Dynamo, ResultSet] = {
     //TODO stream of pages
     def wrap[A](
         data: RIO[
-          Clock,
+          Env,
           Timed[java.util.List[java.util.Map[String, AttributeValue]]]
         ],
-        capacity: RIO[Clock, Option[() => ConsumedCapacity]]
+        capacity: RIO[Env, Option[() => ConsumedCapacity]]
     ) =
       ResultSet(
         //TODO: recoverQuery
@@ -530,8 +534,7 @@ object Eval {
     ) = {
       val (aggregates, fields) = resolveProjection(query.projection)
 
-      val results
-          : ZIO[Any, Throwable, RIO[Clock, Timed[QueryResult]]] = query.useIndex
+      val results = query.useIndex
         .map(value =>
           validateIndex(tableDescription, value, field, None).map(Option.apply)
         )

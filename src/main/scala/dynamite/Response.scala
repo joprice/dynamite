@@ -7,24 +7,24 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 import dynamite.Dynamo.DynamoObject
 import zio.{RIO, Task}
-import zio.clock.Clock
 
 sealed abstract class Response
 
 object Response {
 
   type Paged[R, A] = ZStream[R, Throwable, Timed[A]]
-  type ResultPage = Paged[Clock, PageType]
+  type ResultPage = Paged[Eval.Env, PageType]
 
   final case class Info(message: String) extends Response
 
   final case class ResultSet(
-      results: Paged[Clock, List[DynamoObject]],
-      capacity: RIO[Clock, Option[() => ConsumedCapacity]] = Task.succeed(None)
+      results: Paged[Eval.Env, List[DynamoObject]],
+      capacity: RIO[Eval.Env, Option[() => ConsumedCapacity]] =
+        Task.succeed(None)
   ) extends Response
 
   final case class TableNames(
-      names: Paged[Clock, List[String]]
+      names: Paged[Eval.Env, List[String]]
   ) extends Response
 
   sealed trait TableSchema {
