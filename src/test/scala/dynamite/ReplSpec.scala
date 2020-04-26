@@ -495,8 +495,8 @@ object ReplSpec extends DefaultRunnableSpec {
             )
           )
       },
-      test("render as row")(
-        assert(
+      testM("render as row")(
+        assertM(
           Repl.renderRow(
             Map(
               "name" -> new AttributeValue().withS("name"),

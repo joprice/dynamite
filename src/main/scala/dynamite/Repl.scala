@@ -146,15 +146,11 @@ object Repl {
                   .flatMap(value => Task(out.println(value)))
               }
           case Ast.Format.Tabular =>
-            Task {
-              out.print(
-                render(
-                  values,
-                  select.projection,
-                  width = Some(reader.terminalWidth)
-                )
-              )
-            }
+            render(
+              values,
+              select.projection,
+              width = Some(reader.terminalWidth)
+            ).map(out.print)
         }
       case PageType.TableNamePaging(tableNames) =>
         Task {
@@ -394,35 +390,40 @@ object Repl {
 
   def quoteString(s: String) = s""""$s""""
 
-  def renderAttribute(value: AttributeValue): String =
+  def renderAttribute(value: AttributeValue): Task[String] =
     Option(value.getBOOL)
       .map(_.toString)
       .orElse(Option(value.getS).map(s => s""""$s""""))
+      .orElse(Option(value.getNULL).map(_ => "null"))
+      .orElse(Option(value.getN))
+      .map(Task.succeed(_))
+      .orElse(Option(value.getM).map { value =>
+        renderRow(value.asScala.toMap)
+        .map(_.map {
+            case (key, value) => s""""$key": $value"""
+          }
+          .mkString("{", ", ", "}")
+          )
+      })
       .orElse(
         Option(value.getL)
-          .map(list => list.asScala.map(renderAttribute))
+          .map(list => Task.foreach(list.asScala)(renderAttribute))
           .orElse(
             Option(value.getSS)
               .map(_.asScala.map(quoteString))
               .orElse(Option(value.getNS).map(_.asScala))
+              .map(Task.succeed(_))
           )
-          .map(_.mkString("[", ",", "]"))
+          .map(value => value.map(_.mkString("[", ",", "]")))
       )
-      .orElse(Option(value.getNULL).map(_ => "null"))
-      .orElse(Option(value.getM).map { value =>
-        renderRow(value.asScala.toMap)
-          .map {
-            case (key, value) => s""""$key": $value"""
-          }
-          .mkString("{", ", ", "}")
-      })
-      .orElse(Option(value.getN))
       //TODO: BS - Binary Set
       // B: binary
-      .getOrElse(throw new Exception(s"Failed to render $value"))
+      .getOrElse(Task.fail(new Exception(s"Failed to render $value")))
 
-  def renderRow(item: DynamoObject): Map[String, String] =
-    item.view.mapValues(renderAttribute).toMap
+  def renderRow(item: DynamoObject): Task[Map[String, String]] =
+    ZIO.foreach(item) { case (key, value) =>
+      renderAttribute(value).map(key -> _)
+    }.map(_.toMap)
 
   //TODO: when projecting all fields, show hash/sort keys first?
   def render(
@@ -431,31 +432,34 @@ object Repl {
       withHeaders: Boolean = true,
       align: Boolean = true,
       width: Option[Int] = None
-  ): String = {
+  ): Task[String] = {
     val headers = Repl.headers(select, list)
     //TODO: not all fields need the same names. If All was provided in the query,
     // alphas sort by fields present in all objects, followed by the sparse ones?
     //TODO: match order provided if not star
-    val body = list.map { item =>
-      val data = renderRow(item)
-      // missing fields are represented by an empty str
-      headers.map(header => Str(truncate(data.getOrElse(header, ""))))
+    val body = ZIO.foreach(list) { item =>
+      renderRow(item).map {  data =>
+        // missing fields are represented by an empty str
+        headers.map(header => Str(truncate(data.getOrElse(header, ""))))
+      }
     }
-    if (align) {
-      val writer = new StringWriter()
-      val out = new PrintWriter(writer)
-      out.println(
-        Table(
-          if (withHeaders) headers else Seq.empty,
-          body,
-          width
+    body.map { body =>
+      if (align) {
+        val writer = new StringWriter()
+        val out = new PrintWriter(writer)
+        out.println(
+          Table(
+            if (withHeaders) headers else Seq.empty,
+            body,
+            width
+          )
         )
-      )
-      writer.toString
-    } else {
-      (headers +: body)
-        .map(row => row.mkString("\t"))
-        .mkString("\n")
+        writer.toString
+      } else {
+        (headers +: body)
+          .map(row => row.mkString("\t"))
+          .mkString("\n")
+      }
     }
   }
 
