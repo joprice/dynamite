@@ -4,7 +4,6 @@ import dynamite.Ast.{Format => _, _}
 import jline.internal.Ansi
 import zio._
 import zio.config.Config
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.amazonaws.services.dynamodbv2.model.AttributeValue
 import dynamite.Dynamo.DynamoObject
 import zio.console.{putStrLn, Console}
@@ -84,24 +83,20 @@ object Script {
         JsObject(_)
       }
 
-  def withClient[A](opts: Opts) =
-    ZManaged.make {
-      for {
-        config <- ZIO.access[Config[DynamiteConfig]](_.get)
-      } yield Repl.dynamoClient(config, opts)
-    }(client => ZIO.effectTotal(client.shutdown()))
-
   //TODO: typed error
   def apply(
-      opts: Opts,
       input: String
-  ): ZIO[Config[DynamiteConfig] with Console with Eval.Env, Throwable, Unit] =
-    withClient(opts).use(client => eval(opts, input, client))
+  ): ZIO[Config[DynamiteConfig] with Console with Eval.Env with Has[
+    Opts
+  ], Throwable, Unit] =
+    for {
+      opts <- ZIO.access[Has[Opts]](_.get)
+      result <- eval(opts, input)
+    } yield result
 
   def eval(
       opts: Opts,
-      input: String,
-      client: AmazonDynamoDBAsync
+      input: String
   ): ZIO[Console with Eval.Env, Throwable, Unit] =
     Parser
       .parse(input.trim.stripSuffix(";"))
@@ -111,8 +106,8 @@ object Script {
             new Exception(Ansi.stripAnsi(Repl.parseError(input, failure)))
           ), {
           case query: Query =>
-            val tables = new TableCache(Eval.describeTable(client, _))
-            Eval(client, query, tables, pageSize = 20).flatMap {
+            val tables = new TableCache(Eval.describeTable)
+            Eval(query, tables, pageSize = 20).flatMap {
               results =>
                 (query, results) match {
                   case (select: Ast.Select, Response.ResultSet(pages, _)) =>

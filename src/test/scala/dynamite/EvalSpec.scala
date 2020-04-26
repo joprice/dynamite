@@ -1,12 +1,11 @@
 package dynamite
 
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import dynamite.Ast.{Query, ReplCommand}
 import com.amazonaws.services.dynamodbv2.model.{
   ResourceNotFoundException,
   ScalarAttributeType
 }
-import dynamite.Dynamo.Dynamo
+import dynamite.Dynamo.{Dynamo, DynamoClient}
 import dynamite.Eval.{
   AmbiguousIndexException,
   InvalidHashKeyException,
@@ -19,7 +18,7 @@ import dynamite.Eval.{
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
 import play.api.libs.json.{JsValue, Json}
 import zio.random.Random
-import zio.{Has, Task, ZIO, ZLayer, ZManaged}
+import zio.{Has, Task, ZIO, ZManaged}
 import zio.test.{TestAspect, _}
 import zio.test.Assertion._
 
@@ -48,17 +47,15 @@ object EvalSpec extends DefaultRunnableSpec {
             .tapM(client => Task(Seed.insertSeedData(tableName, client)))
       }
 
-  type DynamoClient = Has[AmazonDynamoDBAsync]
-
   def run(
       query: String
   ): ZIO[Random with DynamoClient with Dynamo, Throwable, Response] =
     ZManaged
       .access[DynamoClient](_.get)
       .use { client =>
-        val tableCache = new TableCache(Eval.describeTable(client, _))
+        val tableCache = new TableCache(Eval.describeTable)
         ZIO.fromEither(Parser.parse(query)).flatMap {
-          case result: Query => Eval(client, result, tableCache, pageSize = 20)
+          case result: Query => Eval(result, tableCache, pageSize = 20)
           case _: ReplCommand =>
             Task.fail(new Exception("Invalid command type"))
         }
@@ -330,7 +327,7 @@ object EvalSpec extends DefaultRunnableSpec {
         assertM(
           run(
             s"select id from $tableName where name = 'Disco Fever' use index playlist-name"
-          ).tap(value => zio.console.putStrLn(s"!!!!!!!!!! $value")).flip
+          ).flip
         )(
           equalTo(
             InvalidHashKeyException(
@@ -501,7 +498,5 @@ object EvalSpec extends DefaultRunnableSpec {
       createTables
         .map(_ => ZIO.succeed(_: TestSuccess))
         .mapError(TestFailure.die)
-    ) provideCustomLayerShared (ZLayer
-      .fromManaged(dynamoClient)
-      ++ Dynamo.live).orDie
+    ) provideCustomLayerShared ((dynamoClient >>> Dynamo.live.passthrough).orDie)
 }

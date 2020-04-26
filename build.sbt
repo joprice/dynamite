@@ -58,7 +58,6 @@ resolvers ++= Seq(
 classpathTypes ++= Set("dylib", "so")
 
 val zioVersion = "1.0.0-RC18-2"
-val scanamoVersion = "1.0.0-M12-1"
 val zioConfigVersion = "1.0.0-RC16-2"
 
 libraryDependencies ++= Seq(

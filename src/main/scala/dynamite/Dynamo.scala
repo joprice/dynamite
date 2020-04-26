@@ -1,8 +1,15 @@
 package dynamite
 
-import com.amazonaws.AmazonWebServiceRequest
+import scala.concurrent.duration._
+import com.amazonaws.auth.AWSCredentialsProvider
+import com.amazonaws.auth.profile.ProfileCredentialsProvider
+import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
+import com.amazonaws.{AmazonWebServiceRequest, ClientConfiguration}
 import com.amazonaws.handlers.AsyncHandler
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
+import com.amazonaws.services.dynamodbv2.{
+  AmazonDynamoDBAsync,
+  AmazonDynamoDBAsyncClientBuilder
+}
 import com.amazonaws.services.dynamodbv2.model.{
   AmazonDynamoDBException,
   AttributeValue,
@@ -10,7 +17,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 
 import scala.jdk.CollectionConverters._
-import zio.{Has, IO, ZIO, ZLayer}
+import zio.{Has, IO, ZIO, ZLayer, ZManaged}
 import com.amazonaws.services.dynamodbv2.model.{
   Delete => _,
   Select => _,
@@ -18,40 +25,78 @@ import com.amazonaws.services.dynamodbv2.model.{
   Update => _,
   _
 }
+import zio.config.Config
 
 object Dynamo {
   type DynamoObject = Map[String, AttributeValue]
   type Result[A] = IO[AmazonDynamoDBException, A]
   type Dynamo = Has[Service]
+  type DynamoClient = Has[AmazonDynamoDBAsync]
   type ServiceResult[A] = ZIO[Dynamo, AmazonDynamoDBException, A]
   type Key = (String, AttributeValue)
+
+  def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDBAsync = {
+    val endpoint = opts.endpoint.orElse(config.endpoint)
+    val credentials = opts.profile.map {
+      new ProfileCredentialsProvider(_)
+    }
+    dynamoClient(endpoint, credentials)
+  }
+
+  def dynamoClient(
+      endpoint: Option[String],
+      credentials: Option[AWSCredentialsProvider]
+  ): AmazonDynamoDBAsync = {
+    val clientConfig = new ClientConfiguration()
+      .withConnectionTimeout(1.second.toMillis.toInt)
+      .withSocketTimeout(1.second.toMillis.toInt)
+    val builder = AmazonDynamoDBAsyncClientBuilder
+      .standard()
+      .withClientConfiguration(clientConfig)
+    val withEndpoint = endpoint.fold(builder) { endpoint =>
+      builder.withEndpointConfiguration(
+        new EndpointConfiguration(endpoint, builder.getRegion)
+      )
+    }
+    credentials
+      .fold(withEndpoint) { credentials =>
+        withEndpoint.withCredentials(credentials)
+      }
+      .build()
+  }
+
+  val withClient =
+    ZManaged.make {
+      for {
+        opts <- ZIO.access[Has[Opts]](_.get)
+        config <- ZIO.access[Config[DynamiteConfig]](_.get)
+      } yield dynamoClient(config, opts)
+    }(client => ZIO.effectTotal(client.shutdown()))
+
+  val layer =
+    ZLayer.fromManaged(withClient)
 
   trait Service {
 
     def describeTable(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String
     ): Result[DescribeTableResult]
 
     def listTables(
-        dynamo: AmazonDynamoDBAsync
-    ): Result[List[String]]
+        ): Result[List[String]]
 
     def scan(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         fields: Seq[String],
         limit: Option[Int]
     ): Result[ScanResult]
 
     def insert(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         item: DynamoObject
     ): Result[PutItemResult]
 
     def query(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         hash: Key,
         range: Option[Key],
@@ -62,7 +107,6 @@ object Dynamo {
     ): Result[QueryResult]
 
     def getItem(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         hash: Key,
         range: Key,
@@ -70,20 +114,17 @@ object Dynamo {
     ): Result[GetItemResult]
 
     def putItem(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         item: DynamoObject
     ): Result[PutItemResult]
 
     def deleteItem(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         hash: Key,
         range: Option[Key]
     ): Result[DeleteItemResult]
 
     def updateItem(
-        dynamo: AmazonDynamoDBAsync,
         tableName: String,
         hash: Key,
         range: Option[Key],
@@ -115,263 +156,251 @@ object Dynamo {
       val _ = f(req, handler)
     }
 
-  val live = ZLayer.succeed(new Service {
+  val live = ZLayer.fromService[AmazonDynamoDBAsync, Service] { dynamo =>
+    new Service {
 
-    def describeTable(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String
-    ) =
-      Dynamo.dynamoRequest(
-        dynamo.describeTableAsync(
-          _: DescribeTableRequest,
-          _: AsyncHandler[DescribeTableRequest, DescribeTableResult]
-        ),
-        new DescribeTableRequest()
-          .withTableName(tableName)
-      )
-
-    //TODO: paginate using ZStream
-    def listTables(
-        dynamo: AmazonDynamoDBAsync
-    ) =
-      Dynamo
-        .dynamoRequest(
-          dynamo.listTablesAsync(
-            _: ListTablesRequest,
-            _: AsyncHandler[ListTablesRequest, ListTablesResult]
+      def describeTable(
+          tableName: String
+      ) =
+        dynamoRequest(
+          dynamo.describeTableAsync(
+            _: DescribeTableRequest,
+            _: AsyncHandler[DescribeTableRequest, DescribeTableResult]
           ),
-          new ListTablesRequest()
-        )
-        // //TODO: time by page, and sum?
-        // def it = dynamo.listTables().pages().iterator().asScala.map {
-        //   _.iterator().asScala.map(_.getTableName).toList
-        // }
-        .map {
-          _.getTableNames.asScala.toList
-        }
-
-    def scan(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        fields: Seq[String],
-        limit: Option[Int]
-    ) = {
-      val spec = new ScanRequest()
-        .withTableName(tableName)
-      val withFields = if (fields.nonEmpty) {
-        val keys = fields.map(field => s"#$field")
-        spec
-          .withProjectionExpression(keys.mkString(","))
-          .withExpressionAttributeNames(
-            keys.zip(fields).toMap.asJava
-          )
-      } else spec
-      val withLimit = limit
-        .fold(withFields)(limit => withFields.withLimit(limit))
-      Dynamo.dynamoRequest(dynamo.scanAsync, withLimit)
-    }
-
-    def insert(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        item: DynamoObject
-    ) =
-      Dynamo
-        .dynamoRequest(
-          dynamo.putItemAsync,
-          new PutItemRequest()
+          new DescribeTableRequest()
             .withTableName(tableName)
-            .withItem(item.asJava)
         )
 
-    def query(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        hash: Key,
-        range: Option[Key],
-        index: Option[String],
-        fields: Seq[String],
-        limit: Option[Int],
-        scanForward: Boolean
-    ) = {
-      val (hashKey, hashValue) = hash
-      val keyFields = hashKey +: range.map(_._1).toList
-      val spec = {
-        val _spec = new QueryRequest()
-          .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
-          .withTableName(tableName)
-        val allFields = keyFields ++ fields
-        def toKey(field: String) = s"#$field"
-        val fieldsKeys = fields.map(toKey)
-        val keys = keyFields.map(toKey) ++ fieldsKeys
-        val withFields = if (fields.nonEmpty) {
-          _spec
-            .withProjectionExpression(fieldsKeys.mkString(","))
-        } else _spec
-        val withProjection = if (allFields.nonEmpty) {
-          withFields.withExpressionAttributeNames(
-            keys.zip(allFields).distinct.toMap.asJava
+      //TODO: paginate using ZStream
+      def listTables(
+          ) =
+        Dynamo
+          .dynamoRequest(
+            dynamo.listTablesAsync(
+              _: ListTablesRequest,
+              _: AsyncHandler[ListTablesRequest, ListTablesResult]
+            ),
+            new ListTablesRequest()
           )
-        } else withFields
-        val withLimit = limit
-          .fold(withProjection)(limit => withProjection.withLimit(limit))
-          // .withMaxPageSize(pageSize)
-          .withScanIndexForward(scanForward)
-        index
-          .fold(withLimit)(index => withLimit.withIndexName(index))
-          .tapOpt(range)(
-            _.withKeyConditionExpression(
-              s"#$hashKey = :$hashKey"
-            ).withExpressionAttributeValues(
-              Map(
-                s":$hashKey" -> hashValue
-              ).asJava
-            )
-          ) {
-            case (spec, (rangeKey, rangeValue)) =>
-              spec
-                .withKeyConditionExpression(
-                  s"#$hashKey = :$hashKey and #$rangeKey= :$rangeKey"
-                )
-                .withExpressionAttributeValues(
-                  Map(
-                    s":$hashKey" -> hashValue,
-                    s":$rangeKey" -> rangeValue
-                  ).asJava
-                )
+          // //TODO: time by page, and sum?
+          // def it = dynamo.listTables().pages().iterator().asScala.map {
+          //   _.iterator().asScala.map(_.getTableName).toList
+          // }
+          .map {
+            _.getTableNames.asScala.toList
           }
-      }
-      dynamoRequest(dynamo.queryAsync, spec)
-    }
 
-    def getItem(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        hash: Key,
-        range: Key,
-        fields: Seq[String]
-    ) = {
-      val spec = {
-        val _spec = new GetItemRequest()
+      def scan(
+          tableName: String,
+          fields: Seq[String],
+          limit: Option[Int]
+      ) = {
+        val spec = new ScanRequest()
           .withTableName(tableName)
-        val withKey = _spec.withKey(Map(hash, range).asJava)
-        if (fields.nonEmpty) {
+        val withFields = if (fields.nonEmpty) {
           val keys = fields.map(field => s"#$field")
-          withKey
+          spec
             .withProjectionExpression(keys.mkString(","))
             .withExpressionAttributeNames(
               keys.zip(fields).toMap.asJava
             )
-        } else _spec
+        } else spec
+        val withLimit = limit
+          .fold(withFields)(limit => withFields.withLimit(limit))
+        Dynamo.dynamoRequest(dynamo.scanAsync, withLimit)
       }
-      dynamoRequest(dynamo.getItemAsync, spec)
-    }
 
-    def putItem(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        item: DynamoObject
-    ) =
-      Dynamo
-        .dynamoRequest(
-          dynamo.putItemAsync,
-          new PutItemRequest()
+      def insert(
+          tableName: String,
+          item: DynamoObject
+      ) =
+        Dynamo
+          .dynamoRequest(
+            dynamo.putItemAsync,
+            new PutItemRequest()
+              .withTableName(tableName)
+              .withItem(item.asJava)
+          )
+
+      def query(
+          tableName: String,
+          hash: Key,
+          range: Option[Key],
+          index: Option[String],
+          fields: Seq[String],
+          limit: Option[Int],
+          scanForward: Boolean
+      ) = {
+        val (hashKey, hashValue) = hash
+        val keyFields = hashKey +: range.map(_._1).toList
+        val spec = {
+          val _spec = new QueryRequest()
+            .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
             .withTableName(tableName)
-            .withItem(item.asJava)
+          val allFields = keyFields ++ fields
+          def toKey(field: String) = s"#$field"
+          val fieldsKeys = fields.map(toKey)
+          val keys = keyFields.map(toKey) ++ fieldsKeys
+          val withFields = if (fields.nonEmpty) {
+            _spec
+              .withProjectionExpression(fieldsKeys.mkString(","))
+          } else _spec
+          val withProjection = if (allFields.nonEmpty) {
+            withFields.withExpressionAttributeNames(
+              keys.zip(allFields).distinct.toMap.asJava
+            )
+          } else withFields
+          val withLimit = limit
+            .fold(withProjection)(limit => withProjection.withLimit(limit))
+            // .withMaxPageSize(pageSize)
+            .withScanIndexForward(scanForward)
+          index
+            .fold(withLimit)(index => withLimit.withIndexName(index))
+            .tapOpt(range)(
+              _.withKeyConditionExpression(
+                s"#$hashKey = :$hashKey"
+              ).withExpressionAttributeValues(
+                Map(
+                  s":$hashKey" -> hashValue
+                ).asJava
+              )
+            ) {
+              case (spec, (rangeKey, rangeValue)) =>
+                spec
+                  .withKeyConditionExpression(
+                    s"#$hashKey = :$hashKey and #$rangeKey= :$rangeKey"
+                  )
+                  .withExpressionAttributeValues(
+                    Map(
+                      s":$hashKey" -> hashValue,
+                      s":$rangeKey" -> rangeValue
+                    ).asJava
+                  )
+            }
+        }
+        dynamoRequest(dynamo.queryAsync, spec)
+      }
+
+      def getItem(
+          tableName: String,
+          hash: Key,
+          range: Key,
+          fields: Seq[String]
+      ) = {
+        val spec = {
+          val _spec = new GetItemRequest()
+            .withTableName(tableName)
+          val withKey = _spec.withKey(Map(hash, range).asJava)
+          if (fields.nonEmpty) {
+            val keys = fields.map(field => s"#$field")
+            withKey
+              .withProjectionExpression(keys.mkString(","))
+              .withExpressionAttributeNames(
+                keys.zip(fields).toMap.asJava
+              )
+          } else withKey
+        }
+        dynamoRequest(dynamo.getItemAsync, spec)
+      }
+
+      def putItem(
+          tableName: String,
+          item: DynamoObject
+      ) =
+        Dynamo
+          .dynamoRequest(
+            dynamo.putItemAsync,
+            new PutItemRequest()
+              .withTableName(tableName)
+              .withItem(item.asJava)
+          )
+
+      def deleteItem(
+          tableName: String,
+          hash: Key,
+          range: Option[Key]
+      ) =
+        dynamoRequest(
+          dynamo.deleteItemAsync,
+          new DeleteItemRequest()
+            .withTableName(tableName)
+            .withKey(
+              (Map(hash) ++ range
+                .fold[DynamoObject](Map.empty)(Map(_))).asJava
+            )
         )
 
-    def deleteItem(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        hash: Key,
-        range: Option[Key]
-    ) =
-      dynamoRequest(
-        dynamo.deleteItemAsync,
-        new DeleteItemRequest()
-          .withTableName(tableName)
+      def updateItem(
+          tableName: String,
+          hash: Key,
+          range: Option[Key],
+          fields: Seq[(String, AttributeValue)]
+      ) = {
+        //TODO: avoid accidental upsert on update
+        // .withExpected(expected.asJava)
+        //        val expected = (Seq(hash) ++ range.toSeq)
+        // .map(key => key -> new ExpectedAttributeValue(key.field).exists())
+        // .toMap
+        val spec = new UpdateItemRequest()
           .withKey(
             (Map(hash) ++ range.fold[DynamoObject](Map.empty)(Map(_))).asJava
           )
-      )
-
-    def updateItem(
-        dynamo: AmazonDynamoDBAsync,
-        tableName: String,
-        hash: Key,
-        range: Option[Key],
-        fields: Seq[(String, AttributeValue)]
-    ) = {
-      //TODO: avoid accidental upsert on update
-      // .withExpected(expected.asJava)
-      //        val expected = (Seq(hash) ++ range.toSeq)
-      // .map(key => key -> new ExpectedAttributeValue(key.field).exists())
-      // .toMap
-      val spec = new UpdateItemRequest()
-        .withTableName(tableName)
-        .withKey(
-          (Map(hash) ++ range.fold[DynamoObject](Map.empty)(Map(_))).asJava
-        )
-        .withUpdateExpression(
-          "set " +
+          .withTableName(tableName)
+          .withUpdateExpression(
+            "set " +
+              fields
+                .map {
+                  case (key, _) =>
+                    s"#$key = :$key"
+                }
+                .mkString(", ")
+          )
+          .withExpressionAttributeNames(
             fields
               .map {
                 case (key, _) =>
-                  s"#$key = :$key"
+                  s"#$key" -> key
               }
-              .mkString(", ")
-        )
-        .withExpressionAttributeNames(
-          fields
-            .map {
-              case (key, _) =>
-                s"#$key" -> key
-            }
-            .toMap
-            .asJava
-        )
-        .withExpressionAttributeValues(
-          fields
-            .map {
-              case (key, value) =>
-                s":$key" -> value
-            }
-            .toMap
-            .asJava
-        )
-      // .withExpected(expected.asJava)
-      dynamoRequest(dynamo.updateItemAsync, spec)
+              .toMap
+              .asJava
+          )
+          .withExpressionAttributeValues(
+            fields
+              .map {
+                case (key, value) =>
+                  s":$key" -> value
+              }
+              .toMap
+              .asJava
+          )
+        // .withExpected(expected.asJava)
+        dynamoRequest(dynamo.updateItemAsync, spec)
+      }
     }
-  })
+  }
 
   def describeTable(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String
   ): ServiceResult[DescribeTableResult] =
-    ZIO.accessM[Dynamo](_.get.describeTable(dynamo, tableName))
+    ZIO.accessM[Dynamo](_.get.describeTable(tableName))
 
-  def listTables(
-      dynamo: AmazonDynamoDBAsync
-  ): ServiceResult[List[String]] =
-    ZIO.accessM[Dynamo](_.get.listTables(dynamo))
+  def listTables: ServiceResult[List[String]] =
+    ZIO.accessM[Dynamo](_.get.listTables())
 
   def scan(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       fields: Seq[String],
       limit: Option[Int]
   ): ServiceResult[ScanResult] =
-    ZIO.accessM[Dynamo](_.get.scan(dynamo, tableName, fields, limit))
+    ZIO.accessM[Dynamo](_.get.scan(tableName, fields, limit))
 
   def insert(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       item: DynamoObject
   ): ServiceResult[PutItemResult] =
-    ZIO.accessM[Dynamo](_.get.insert(dynamo, tableName, item))
+    ZIO.accessM[Dynamo](_.get.insert(tableName, item))
 
   def query(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       hash: Key,
       range: Option[Key],
@@ -382,7 +411,6 @@ object Dynamo {
   ): ServiceResult[QueryResult] =
     ZIO.accessM[Dynamo](
       _.get.query(
-        dynamo,
         tableName,
         hash,
         range,
@@ -394,39 +422,35 @@ object Dynamo {
     )
 
   def getItem(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       hash: Key,
       range: Key,
       fields: Seq[String]
   ): ServiceResult[GetItemResult] =
-    ZIO.accessM[Dynamo](_.get.getItem(dynamo, tableName, hash, range, fields))
+    ZIO.accessM[Dynamo](_.get.getItem(tableName, hash, range, fields))
 
   def putItem(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       item: DynamoObject
   ): ServiceResult[PutItemResult] =
-    ZIO.accessM[Dynamo](_.get.putItem(dynamo, tableName, item))
+    ZIO.accessM[Dynamo](_.get.putItem(tableName, item))
 
   def deleteItem(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       hash: Key,
       range: Option[Key]
   ): ServiceResult[DeleteItemResult] =
-    ZIO.accessM[Dynamo](_.get.deleteItem(dynamo, tableName, hash, range))
+    ZIO.accessM[Dynamo](_.get.deleteItem(tableName, hash, range))
 
   val access = ZIO.accessM[Dynamo]
 
   def updateItem(
-      dynamo: AmazonDynamoDBAsync,
       tableName: String,
       hash: Key,
       range: Option[Key],
       fields: Seq[(String, AttributeValue)]
   ): ServiceResult[UpdateItemResult] =
     access(
-      _.get.updateItem(dynamo, tableName, hash, range, fields)
+      _.get.updateItem(tableName, hash, range, fields)
     )
 }

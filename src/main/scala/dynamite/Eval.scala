@@ -11,7 +11,6 @@ import com.amazonaws.services.dynamodbv2.model.{
 import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 import dynamite.Response._
 import scala.jdk.CollectionConverters._
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import dynamite.Dynamo.Dynamo
 import zio._
 import zio.clock.Clock
@@ -22,18 +21,17 @@ object Eval {
   type Env = Clock with Dynamo.Dynamo
 
   def apply(
-      dynamo: AmazonDynamoDBAsync,
       query: Query,
       tableCache: TableCache[Dynamo],
       pageSize: Int
   ): RIO[Dynamo.Dynamo, Response] =
     query match {
       case query: Select =>
-        select(dynamo, query, pageSize, tableCache)
-      case query: Update => update(dynamo, query)
-      case query: Delete => delete(dynamo, query)
-      case query: Insert => insert(dynamo, query)
-      case ShowTables    => Task.succeed(showTables(dynamo))
+        select(query, pageSize, tableCache)
+      case query: Update => update(query)
+      case query: Delete => delete(query)
+      case query: Insert => insert(query)
+      case ShowTables    => Task.succeed(showTables)
       case DescribeTable(table) =>
         tableCache
           .get(table)
@@ -261,12 +259,9 @@ object Eval {
         s"Range key of '${range.name}' of index '$indexName' does not match provided hash key '$rangeKey'."
       )
 
-  def describeTable(
-      dynamo: AmazonDynamoDBAsync,
-      tableName: String
-  ): RIO[Dynamo, TableDescription] =
+  def describeTable(tableName: String): RIO[Dynamo, TableDescription] =
     for {
-      result <- Dynamo.describeTable(dynamo, tableName)
+      result <- Dynamo.describeTable(tableName)
     } yield {
       val description = result.getTable
       val attributes =
@@ -318,19 +313,15 @@ object Eval {
       TableDescription(tableName, key.get, range, schemas)
     }
 
-  def showTables(
-      dynamo: AmazonDynamoDBAsync
-  ): TableNames =
-    TableNames(
-      ZStream.fromEffect(
-        Timed(
-          Dynamo.listTables(dynamo)
-        )
+  def showTables: TableNames = TableNames(
+    ZStream.fromEffect(
+      Timed(
+        Dynamo.listTables
       )
     )
+  )
 
   def insert(
-      dynamo: AmazonDynamoDBAsync,
       query: Insert
   ): RIO[Dynamo, Complete.type] = {
     val item = query.values
@@ -340,13 +331,12 @@ object Eval {
       }
     //TODO: timed
     Dynamo
-      .putItem(dynamo, query.table, item)
+      .putItem(query.table, item)
       .as(Complete)
   }
 
   //TODO: condition expression that item must exist?
   def delete(
-      dynamo: AmazonDynamoDBAsync,
       query: Delete
   ): RIO[Dynamo, Complete.type] = {
     //TODO: optionally return consumed capacity
@@ -358,7 +348,6 @@ object Eval {
     //TODO: timed
     Dynamo
       .deleteItem(
-        dynamo,
         tableName = query.table,
         hash = (hashKey, toAttributeValue(hashValue)),
         range = range
@@ -368,7 +357,6 @@ object Eval {
 
   //TODO: change response to more informative type
   def update(
-      dynamo: AmazonDynamoDBAsync,
       query: Update
   ): RIO[Dynamo, Complete.type] =
     recoverQuery(
@@ -376,7 +364,6 @@ object Eval {
         val Key(hashKey, hashValue) = query.key.hash
         Dynamo
           .updateItem(
-            dynamo,
             query.table,
             hash = hashKey -> toAttributeValue(hashValue),
             range = query.key.range.map {
@@ -392,7 +379,6 @@ object Eval {
     )
 
   def select(
-      dynamo: AmazonDynamoDBAsync,
       query: Select,
       pageSize: Int,
       tableCache: TableCache[Dynamo]
@@ -451,7 +437,6 @@ object Eval {
           val (aggregates, fields) = resolveProjection(query.projection)
           val results = Timed(
             Dynamo.query(
-              dynamo,
               tableName = query.from,
               hash = (hashKey, toAttributeValue(hashValue)),
               range = Some(rangeKey -> toAttributeValue(rangeValue)),
@@ -478,7 +463,6 @@ object Eval {
         validateKeys(tableDescription).map { _ =>
           val results = Timed(
             Dynamo.getItem(
-              dynamo,
               tableName = query.from,
               hash = hashKey -> toAttributeValue(hashValue),
               range = rangeKey -> toAttributeValue(rangeValue),
@@ -563,7 +547,6 @@ object Eval {
               .map { index =>
                 validateOrderBy(index.hash, index.range, query.orderBy) *>
                   Dynamo.query(
-                    dynamo,
                     tableName = query.from,
                     hash = (field, toAttributeValue(value)),
                     range = None,
@@ -582,7 +565,6 @@ object Eval {
                 ) *>
                   //TODO: combine with above (just return index
                   Dynamo.query(
-                    dynamo,
                     tableName = query.from,
                     hash = (field, toAttributeValue(value)),
                     range = None,
@@ -610,7 +592,7 @@ object Eval {
       //TODO: scan doesn't support order (because doesn't on hash key?)
       val (aggregates, fields) = resolveProjection(query.projection)
       val results = Timed(
-        Dynamo.scan(dynamo, query.from, fields, limit = query.limit)
+        Dynamo.scan(query.from, fields, limit = query.limit)
       )
       (
         aggregates,
