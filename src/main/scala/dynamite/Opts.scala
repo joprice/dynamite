@@ -27,11 +27,11 @@ object Opts {
       .text("Config file location. Default is $HOME/.dynamite/config")
 
     opt[String]("endpoint")
-      .action { (endpoint, config) => config.copy(endpoint = Some(endpoint)) }
+      .action((endpoint, config) => config.copy(endpoint = Some(endpoint)))
       .text("aws endpoint")
 
     opt[String]("profile")
-      .action { (profile, config) => config.copy(profile = Some(profile)) }
+      .action((profile, config) => config.copy(profile = Some(profile)))
       .text("AWS IAM profile")
 
     opt[Format]("format").action { (render, config) =>

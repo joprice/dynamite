@@ -45,7 +45,7 @@ object EvalSpec extends DefaultRunnableSpec {
               client.deleteTable(tableName)
             )
             .as(client)
-            .tapM { client => Task(Seed.insertSeedData(tableName, client)) }
+            .tapM(client => Task(Seed.insertSeedData(tableName, client)))
       }
 
   type DynamoClient = Has[AmazonDynamoDBAsync]

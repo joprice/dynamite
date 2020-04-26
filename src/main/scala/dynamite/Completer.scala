@@ -76,7 +76,7 @@ object Completer {
           tableCache
             .get(name)
         )
-        .map { desc => (desc.hash +: desc.range.toSeq).map(_.name) }
+        .map(desc => (desc.hash +: desc.range.toSeq).map(_.name))
         .getOrElse(Seq.empty)
     }
 
@@ -84,10 +84,9 @@ object Completer {
         buffer: String,
         cursor: Int,
         candidates: java.util.List[CharSequence]
-    ) = {
+    ) =
       new StringsCompleter(keyNames(reader): _*)
         .complete(buffer, cursor, candidates)
-    }
   }
 
   def apply(

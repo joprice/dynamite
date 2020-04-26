@@ -1,13 +1,13 @@
 package dynamite
 
 import java.io.File
-import zio.{ZManaged, Task}
+import zio.{Task, ZManaged}
 import zio.test._
 import zio.test.Assertion._
 
 object DynamiteConfigSpec extends DefaultRunnableSpec {
 
-  def deleteFile(file: File): Task[Unit] = {
+  def deleteFile(file: File): Task[Unit] =
     if (file.exists) {
       for {
         deleted <- if (file.isFile) {
@@ -20,10 +20,9 @@ object DynamiteConfigSpec extends DefaultRunnableSpec {
         } else Task.unit
       } yield ()
     } else Task.unit
-  }
 
   // based on https://github.com/robey/scalatest-mixins/blob/master/src/main/scala/com/twitter/scalatest/TestFolder.scala
-  def tempDirectory[A] = {
+  def tempDirectory[A] =
     ZManaged.make(Task {
       val tempFolder = System.getProperty("java.io.tmpdir")
       var folder: File = null
@@ -31,8 +30,7 @@ object DynamiteConfigSpec extends DefaultRunnableSpec {
         folder = new File(tempFolder, "scalatest-" + System.nanoTime)
       } while (!folder.mkdir())
       folder
-    }) { folder => deleteFile(folder).orDie }
-  }
+    })(folder => deleteFile(folder).orDie)
 
   def spec = suite("config")(
     testM("load default values for empty file")(

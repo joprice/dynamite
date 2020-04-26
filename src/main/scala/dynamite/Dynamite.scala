@@ -26,10 +26,12 @@ object Dynamite extends App {
           case Some(script @ _) => Script(opts, script)
         }).provideSomeLayer[ZEnv with Logging](ZLayer.succeed(config))
       } yield result
-    ).foldM({ error =>
-        log
-          .throwable("An unhandled error occurred", error)
-          .as(1)
-      }, _ => ZIO.succeed(0))
+    ).foldM(
+        error =>
+          log
+            .throwable("An unhandled error occurred", error)
+            .as(1),
+        _ => ZIO.succeed(0)
+      )
       .provideCustomLayer(logging)
 }

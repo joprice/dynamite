@@ -225,12 +225,11 @@ object Parser {
     }
   }
 
-  def parse(input: String): Either[ParseException, Command] = {
+  def parse(input: String): Either[ParseException, Command] =
     // import explicitly as a workaround to this https://github.com/lihaoyi/fastparse/issues/34
     fastparse.parse(input, query(_)) match {
       case Parsed.Success(select: Select, _) => validate(select)
       case Parsed.Success(value, _)          => Right(value)
       case failure: Parsed.Failure           => Left(ParseException.ParseError(failure))
     }
-  }
 }

@@ -13,7 +13,7 @@ import com.amazonaws.services.dynamodbv2.model.{
   ScalarAttributeType
 }
 import zio.test.environment.TestConsole
-import zio.{ZManaged, Task}
+import zio.{Task, ZManaged}
 import zio.test._
 import zio.test.Assertion._
 import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
@@ -44,7 +44,7 @@ object ScriptSpec extends DefaultRunnableSpec {
       )
     } yield result
 
-  private def keySchema(attributes: Seq[(String, ScalarAttributeType)]) = {
+  private def keySchema(attributes: Seq[(String, ScalarAttributeType)]) =
     attributes.toList match {
       case Nil => Task.fail(new Exception("Invalid key schema"))
       case hashKeyWithType :: rangeKeyWithType =>
@@ -58,7 +58,6 @@ object ScriptSpec extends DefaultRunnableSpec {
           }.asJava
         )
     }
-  }
 
   def withTable[T](tableName: String)(
       attributeDefinitions: (String, ScalarAttributeType)*
@@ -99,7 +98,7 @@ object ScriptSpec extends DefaultRunnableSpec {
   val dynamoClient =
     ZManaged
       .fromEffect(randomPort)
-      .flatMap { port => dynamoServer(port) *> dynamoLocalClient(port) }
+      .flatMap(port => dynamoServer(port) *> dynamoLocalClient(port))
 
   def captureStdOut[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
