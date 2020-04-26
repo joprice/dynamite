@@ -63,19 +63,20 @@ dql> describe table playlists;
 Dynamite can also be used to run a single script:
 
 ```bash
-dynamite < query.dql 
+dynamite < query.dql
 ```
 
 By default, the output is the same as the repl output. This can also be set
 to 'json' or 'json-pretty':
 
 ```bash
-dynamite --format=json < query.dql 
+dynamite --format=json < query.dql
 
-dynamite --format=json-pretty < query.dql 
+dynamite --format=json-pretty < query.dql
 ```
 
 ## TODO
 
 * load dynamo client in background on startup
 * order keys before other fields when `select *`
+* check value type matches when building query key conditions

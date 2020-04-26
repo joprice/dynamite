@@ -15,8 +15,9 @@ addCommandAlias(
   Seq(
     "clean",
     //"coverage",
-    "test"
+    "test",
     //"coverageReport"
+    "scalafmtCheck"
   ).mkString(";", ";", "")
 )
 
