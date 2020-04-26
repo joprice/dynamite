@@ -20,7 +20,7 @@ import fansi._
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.auth.AWSCredentialsProvider
 import zio._
-import zio.console.{Console, putStrLn}
+import zio.console.{putStrLn, Console}
 import zio.config.Config
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsyncClientBuilder
@@ -82,10 +82,10 @@ object Repl {
       out: PrintWriter,
       page: Paged[R, A],
       reader: Reader
-  )(process: A => RIO[R, Any]): RIO[R, Paged[R, A]] = {
+  )(process: A => RIO[R, Any]): RIO[R, Paged[R, A]] =
     page.runHead
       .foldM(
-        { error =>
+        error =>
           //        //TODO: if results is less than page size, finish early?
           //      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
           Task {
@@ -98,8 +98,7 @@ object Repl {
             //TODO: file error logger
             out.println(formatError(message))
             ZStream.empty
-          }
-        }, {
+          }, {
           case Some(Timed(values, duration)) =>
             for {
               _ <- process(values)
@@ -124,7 +123,6 @@ object Repl {
           case None => ZIO.succeed(ZStream.empty)
         }
       )
-  }
 
   def renderPage(
       out: PrintWriter,
@@ -145,7 +143,7 @@ object Repl {
               .foreach(values) { value =>
                 Script
                   .printDynamoObject(value, pretty = true)
-                  .flatMap { value => Task(out.println(value)) }
+                  .flatMap(value => Task(out.println(value)))
               }
           case Ast.Format.Tabular =>
             Task {
@@ -279,7 +277,7 @@ object Repl {
                 case query: Query =>
                   eval(query)
                     .foldM(
-                      { ex =>
+                      ex =>
                         Task {
                           val msg = Option(ex.getMessage)
                             .getOrElse("An unknown error occurred")
@@ -287,7 +285,8 @@ object Repl {
                         }
                       //TODO: log throwable when verbose flag?
                       //log.throwable("Failed running query", ex)
-                      }, { results =>
+                      ,
+                      results =>
                         report(out, reader, format, query, results)
                           .catchAll { error =>
                             Task {
@@ -296,12 +295,11 @@ object Repl {
                               out.println(formatError(msg))
                             }
                           }
-                      }
                     )
                     .as(format)
               }
             )
-            .map { newFormat => ("", true, newFormat) }
+            .map(newFormat => ("", true, newFormat))
         } else {
           Task {
             reader.setPrompt(Bold.On(Str("  -> ")).render)
@@ -329,11 +327,11 @@ object Repl {
   val reader = ZManaged.fromAutoCloseable(ZIO.succeed(new ConsoleReader))
 
   def history(file: File, reader: ConsoleReader) =
-    ZManaged.makeEffect({
+    ZManaged.makeEffect {
       val history = new FileHistory(file)
       reader.setHistory(history)
       history
-    })(_.flush())
+    }(_.flush())
 
   def run(client: AmazonDynamoDBAsync, config: DynamiteConfig) =
     reader
@@ -365,27 +363,24 @@ object Repl {
   val ellipsis = "..."
   val maxColumnLength = 40
 
-  def truncate(s: String) = {
+  def truncate(s: String) =
     if (s.length > maxColumnLength)
       s.take(maxColumnLength - ellipsis.length) + ellipsis
     else s
-  }
 
   def headers(
       select: Seq[Ast.Projection],
       data: Seq[DynamoObject]
-  ): Seq[String] = {
+  ): Seq[String] =
     select.flatMap {
       case FieldSelector.All           => data.flatMap(_.keys).distinct.sorted
       case FieldSelector.Field(field)  => Seq(field)
       case count: Aggregate.Count.type => Seq(count.name)
     }
-  }
 
-  def withCloseable[A <: Closeable, B](closeable: A)(f: A => B) = {
+  def withCloseable[A <: Closeable, B](closeable: A)(f: A => B) =
     try f(closeable)
     finally closeable.close()
-  }
 
   def withFileHistory[A](file: File, reader: ConsoleReader)(f: => A) = {
     val history = new FileHistory(file)
@@ -405,7 +400,7 @@ object Repl {
       .orElse(Option(value.getS).map(s => s""""$s""""))
       .orElse(
         Option(value.getL)
-          .map { list => list.asScala.map(renderAttribute) }
+          .map(list => list.asScala.map(renderAttribute))
           .orElse(
             Option(value.getSS)
               .map(_.asScala.map(quoteString))
@@ -510,7 +505,7 @@ object Repl {
     (errorIndex - from, line.substring(from, to))
   }
 
-  def parseError(line: String, failure: ParseException) = {
+  def parseError(line: String, failure: ParseException) =
     failure match {
       case ParseException.ParseError(error) =>
         val (errorIndex, lineWithError) = errorLine(line, error.index)
@@ -522,7 +517,6 @@ object Repl {
       case error: ParseException.UnAggregatedFieldsError =>
         formatError(error.getMessage)
     }
-  }
 
   def formatError(msg: String) = s"[${Bold.On(Color.Red(Str("error")))}] $msg"
 

@@ -213,7 +213,8 @@ object ReplSpec extends DefaultRunnableSpec {
               "",
               new PrintWriter(writer),
               reader,
-              format, { _ =>
+              format,
+              _ =>
                 Task.succeed(
                   Response.ResultSet(
                     ZStream(
@@ -226,7 +227,6 @@ object ReplSpec extends DefaultRunnableSpec {
                     )
                   )
                 )
-              }
             )
           }
           .as(

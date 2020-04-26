@@ -30,7 +30,7 @@ object Eval {
       query: Query,
       tableCache: TableCache,
       pageSize: Int
-  ): Task[Response] = {
+  ): Task[Response] =
     query match {
       case query: Select =>
         select(dynamo, query, pageSize, tableCache)
@@ -43,7 +43,6 @@ object Eval {
           .get(table)
           .map(_.getOrElse(Response.Info(s"No table exists with name $table")))
     }
-  }
 
   def assumeIndex(
       tableCache: TableCache,
@@ -91,7 +90,7 @@ object Eval {
       hash: KeySchema,
       range: Option[KeySchema],
       orderBy: Option[OrderBy]
-  ): Task[Unit] = {
+  ): Task[Unit] =
     orderBy.fold[Task[Unit]](Task.unit) { order =>
       val validOrder =
         range.fold(order.field == hash.name)(_.name == order.field)
@@ -100,14 +99,13 @@ object Eval {
       else
         Task.fail(new Exception(s"'${order.field}' is not a valid sort field."))
     }
-  }
 
   def validateIndex(
       tableDescription: TableDescription,
       indexName: String,
       hashKey: String,
       rangeKey: Option[String]
-  ): Task[Index] = {
+  ): Task[Index] =
     tableDescription.indexes
       .find(_.name == indexName)
       .map { index =>
@@ -128,7 +126,6 @@ object Eval {
       .getOrElse {
         Task.fail(UnknownIndexException(indexName))
       }
-  }
 
   //TODO: handle pagination - use withMaxPageSize instead?
   def scanForward(dir: Option[Direction]) = dir match {
@@ -217,7 +214,7 @@ object Eval {
   def applyAggregates(
       aggregates: Seq[Aggregate],
       resultSet: ResultSet
-  ): ResultSet = {
+  ): ResultSet =
     // For now, using headOption, since the only aggregate supported at the moment is Count(*) and duplicate
     // aggregates will be resolved by reference
     aggregates.headOption.fold(resultSet) {
@@ -246,16 +243,14 @@ object Eval {
           }
         )
     }
-  }
 
   //TODO: use UnknownTableException
-  def recoverQuery[A](table: String, result: Task[A]) = {
+  def recoverQuery[A](table: String, result: Task[A]) =
     result.mapError {
       case _: ResourceNotFoundException =>
         new Exception(s"Table '$table' does not exist")
       case other => other
     }
-  }
 
   final case class AmbiguousIndexException(indexes: Seq[String])
       extends Exception(
@@ -297,7 +292,7 @@ object Eval {
       range: KeySchema,
       rangeKey: String
   ) extends Exception(
-        s"Range key of '${range.name}' of index '${indexName}' does not match provided hash key '$rangeKey'."
+        s"Range key of '${range.name}' of index '$indexName' does not match provided hash key '$rangeKey'."
       )
 
   def describeTable(
@@ -366,7 +361,7 @@ object Eval {
 
   def showTables(
       dynamo: AmazonDynamoDBAsync
-  ): TableNames = {
+  ): TableNames =
     TableNames(
       ZStream.fromEffect(
         Timed(
@@ -388,7 +383,6 @@ object Eval {
         )
       )
     )
-  }
 
   def insert(
       dynamo: AmazonDynamoDBAsync,
@@ -427,7 +421,7 @@ object Eval {
   def update(
       dynamo: AmazonDynamoDBAsync,
       query: Update
-  ): Task[Complete.type] = {
+  ): Task[Complete.type] =
     recoverQuery(
       query.table, {
         val baseSpec = new UpdateItemRequest()
@@ -470,7 +464,6 @@ object Eval {
           .as(Complete)
       }
     )
-  }
 
   def select(
       dynamo: AmazonDynamoDBAsync,
@@ -485,7 +478,7 @@ object Eval {
           Timed[java.util.List[java.util.Map[String, AttributeValue]]]
         ],
         capacity: RIO[Clock, Option[() => ConsumedCapacity]]
-    ) = {
+    ) =
 //      val original: Iterator[Iterator[DynamoObject]] = Iterator {
 //        data.asScala.iterator.map(_.asScala.toMap)
 //      }
@@ -506,7 +499,6 @@ object Eval {
         //TODO:
         //Some(() => results.get  AccumulatedConsumedCapacity)
       )
-    }
 
     def querySpec(keyFields: Seq[String]) = {
       val spec = new QueryRequest()
@@ -531,7 +523,7 @@ object Eval {
       (
         aggregates,
         query.limit
-          .fold(withProjection) { limit => withProjection.withLimit(limit) }
+          .fold(withProjection)(limit => withProjection.withLimit(limit))
           // .withMaxPageSize(pageSize)
           .withScanIndexForward(
             scanForward(query.orderBy.flatMap(_.direction))
@@ -547,7 +539,7 @@ object Eval {
       val Key(hashKey, hashValue) = hash
       val Key(rangeKey, rangeValue) = range
 
-      def validateKeys(schema: TableSchema): Task[Unit] = {
+      def validateKeys(schema: TableSchema): Task[Unit] =
         if (hashKey != schema.hash.name) {
           Task.fail(new Exception(s"Invalid hash key '$hashKey'"))
         } else {
@@ -564,10 +556,9 @@ object Eval {
               )
           }
         }
-      }
 
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
-      def queryIndex(index: Index) = {
+      def queryIndex(index: Index) =
         validateKeys(index).map { _ =>
           val (aggregates, spec) = querySpec(Seq(hashKey, rangeKey))
           val results = Timed(
@@ -597,16 +588,15 @@ object Eval {
             )
           )
         }
-      }
 
-      def getItem(tableDescription: TableDescription) = {
+      def getItem(tableDescription: TableDescription) =
         validateKeys(tableDescription).map { _ =>
           val spec = new GetItemRequest()
             .withTableName(query.from)
           val withKey = spec.withKey(toKey(Ast.PrimaryKey(hash, Some(range))))
           val (aggregates, fields) = resolveProjection(query.projection)
           val withFields = if (fields.nonEmpty) {
-            val keys = fields.map { field => s"#$field" }
+            val keys = fields.map(field => s"#$field")
             withKey
               .withProjectionExpression(keys.mkString(","))
               .withExpressionAttributeNames(
@@ -633,8 +623,6 @@ object Eval {
             )
           )
         }
-
-      }
 
       val getIndex = query.useIndex
         .map(value =>
@@ -760,7 +748,7 @@ object Eval {
         .withTableName(query.from)
       val (aggregates, fields) = resolveProjection(query.projection)
       val withFields = if (fields.nonEmpty) {
-        val keys = fields.map { field => s"#$field" }
+        val keys = fields.map(field => s"#$field")
         spec
           .withProjectionExpression(keys.mkString(","))
           .withExpressionAttributeNames(
@@ -768,7 +756,7 @@ object Eval {
           )
       } else spec
       val withLimit = query.limit
-        .fold(withFields) { limit => withFields.withLimit(limit) }
+        .fold(withFields)(limit => withFields.withLimit(limit))
       val results = Timed(Dynamo.dynamoRequest(dynamo.scanAsync, withLimit))
       (
         aggregates,

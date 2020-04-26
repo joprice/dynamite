@@ -7,7 +7,7 @@ import zio.config.Config
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.amazonaws.services.dynamodbv2.model.AttributeValue
 import dynamite.Dynamo.DynamoObject
-import zio.console.{Console, putStrLn}
+import zio.console.{putStrLn, Console}
 import zio.stream._
 import play.api.libs.json.{
   JsArray,
@@ -81,7 +81,7 @@ object Script {
       })
       .orElse(Option(value.getL).map { value =>
         Task
-          .foreach(value.asScala) { item => attributeValueToJson(item) }
+          .foreach(value.asScala)(item => attributeValueToJson(item))
           .map(JsArray(_))
       })
       .getOrElse {
@@ -110,7 +110,7 @@ object Script {
       opts: Opts,
       input: String
   ): ZIO[Config[DynamiteConfig] with Console with Clock, Throwable, Unit] =
-    withClient(opts).use { client => eval(opts, input, client) }
+    withClient(opts).use(client => eval(opts, input, client))
 
   def eval(
       opts: Opts,
@@ -120,11 +120,10 @@ object Script {
     Parser
       .parse(input.trim.stripSuffix(";"))
       .fold(
-        { failure =>
+        failure =>
           Task.fail(
             new Exception(Ansi.stripAnsi(Repl.parseError(input, failure)))
-          )
-        }, {
+          ), {
           case query: Query =>
             val tables = new TableCache(Eval.describeTable(client, _))
             Eval(client, query, tables, pageSize = 20).flatMap {

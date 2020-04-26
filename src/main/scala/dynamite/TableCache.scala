@@ -10,10 +10,10 @@ class TableCache(describeTable: String => Task[TableDescription]) {
 
   def clear() = tableNameCache.clear()
 
-  def get(tableName: String): Task[Option[TableDescription]] = {
+  def get(tableName: String): Task[Option[TableDescription]] =
     tableNameCache
       .get(tableName)
-      .map { value => Task.succeed(Some(value)) }
+      .map(value => Task.succeed(Some(value)))
       .getOrElse {
         describeTable(tableName)
           .map { result =>
@@ -24,5 +24,4 @@ class TableCache(describeTable: String => Task[TableDescription]) {
             case _: ResourceNotFoundException => Task.succeed(None)
           }
       }
-  }
 }

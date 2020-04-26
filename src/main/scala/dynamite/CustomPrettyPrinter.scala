@@ -11,7 +11,6 @@ class CustomPrettyPrinter extends DefaultPrettyPrinter {
   // This has to be overridden. Otherwise, the superclass implementation will be used when this is called internally
   override def createInstance(): CustomPrettyPrinter = new CustomPrettyPrinter
 
-  override def writeObjectFieldValueSeparator(jg: JsonGenerator): Unit = {
+  override def writeObjectFieldValueSeparator(jg: JsonGenerator): Unit =
     jg.writeRaw(": ")
-  }
 }
