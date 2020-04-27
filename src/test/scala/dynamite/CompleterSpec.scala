@@ -36,5 +36,5 @@ object CompleterSpec extends DefaultRunnableSpec {
       } yield assert(value1)(isSome(equalTo(table))) &&
         assert(value2)(isSome(equalTo(table)))
     }
-  )
+  ) //.provide(Dynamo.live)
 }

@@ -9,17 +9,7 @@ import com.amazonaws.services.dynamodbv2.model.AttributeValue
 import dynamite.Dynamo.DynamoObject
 import zio.console.{putStrLn, Console}
 import zio.stream._
-import play.api.libs.json.{
-  JsArray,
-  JsBoolean,
-  JsNumber,
-  JsObject,
-  JsString,
-  JsValue,
-  Json
-}
-import zio.clock.Clock
-
+import play.api.libs.json.{Format => _, _}
 import scala.jdk.CollectionConverters._
 
 object Script {
@@ -105,14 +95,14 @@ object Script {
   def apply(
       opts: Opts,
       input: String
-  ): ZIO[Config[DynamiteConfig] with Console with Clock, Throwable, Unit] =
+  ): ZIO[Config[DynamiteConfig] with Console with Eval.Env, Throwable, Unit] =
     withClient(opts).use(client => eval(opts, input, client))
 
   def eval(
       opts: Opts,
       input: String,
       client: AmazonDynamoDBAsync
-  ): ZIO[Console with Clock, Throwable, Unit] =
+  ): ZIO[Console with Eval.Env, Throwable, Unit] =
     Parser
       .parse(input.trim.stripSuffix(";"))
       .fold(

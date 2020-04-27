@@ -1,10 +1,5 @@
 package dynamite
 
-import com.amazonaws.services.dynamodbv2.document.{
-  PrimaryKey => DynamoPrimaryKey,
-  Index => _,
-  _
-}
 import dynamite.Ast.{PrimaryKey => _, _}
 import com.amazonaws.services.dynamodbv2.model.{
   Delete => _,
@@ -15,22 +10,23 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 import dynamite.Response._
-
 import scala.jdk.CollectionConverters._
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
-import com.amazonaws.handlers.AsyncHandler
+import dynamite.Dynamo.Dynamo
 import zio._
 import zio.clock.Clock
 import zio.stream.ZStream
 
 object Eval {
 
+  type Env = Clock with Dynamo.Dynamo
+
   def apply(
       dynamo: AmazonDynamoDBAsync,
       query: Query,
-      tableCache: TableCache,
+      tableCache: TableCache[Dynamo],
       pageSize: Int
-  ): Task[Response] =
+  ): RIO[Dynamo.Dynamo, Response] =
     query match {
       case query: Select =>
         select(dynamo, query, pageSize, tableCache)
@@ -45,12 +41,12 @@ object Eval {
     }
 
   def assumeIndex(
-      tableCache: TableCache,
+      tableCache: TableCache[Dynamo],
       tableName: String,
       hashKey: String,
       rangeKey: Option[String],
       orderBy: Option[OrderBy]
-  ): Task[Option[Index]] =
+  ): RIO[Dynamo, Option[Index]] =
     for {
       table <- tableCache
         .get(tableName)
@@ -134,36 +130,6 @@ object Eval {
     case None             => true
   }
 
-  def toDynamoKey(key: Ast.PrimaryKey) = {
-    val Ast.PrimaryKey(hash, range) = key
-    def toAttr(key: Ast.Key) = new KeyAttribute(key.field, unwrap(key.value))
-    val attrs = toAttr(hash) +: range.map(toAttr).toSeq
-    new DynamoPrimaryKey(attrs: _*)
-  }
-
-//  def toAliasedKey(
-//      key: Ast.PrimaryKey
-//  ): java.util.Map[String, AttributeValue] = {
-//    val Ast.PrimaryKey(hash, range) = key
-//    def aliasValue(key: Ast.Key) =
-//      Map(s":${key.field}" -> toAttributeValue(key.value))
-//    def toAttr(key: Ast.Key) = Map(s"#${key.field}" -> s":${key.field}")
-//
-//    val primary = toAttr(hash)
-//    val primaryValue = aliasValue(hash)
-//    (
-//      range.map(toAttr).fold(primary)(primary ++ _).asJava,
-//      range.map(aliasValue).fold(primaryValue)(primaryValue ++ _).asJava
-//    )
-//  }
-
-  def toKey(key: Ast.PrimaryKey): java.util.Map[String, AttributeValue] = {
-    val Ast.PrimaryKey(hash, range) = key
-    def toAttr(key: Ast.Key) = Map(key.field -> toAttributeValue(key.value))
-    val primary = toAttr(hash)
-    range.map(toAttr).fold(primary)(primary ++ _).asJava
-  }
-
   def toAttributeValue(value: Value): AttributeValue = value match {
     case BoolValue(value)   => new AttributeValue().withBOOL(value)
     case StringValue(value) => new AttributeValue().withS(value)
@@ -245,7 +211,7 @@ object Eval {
     }
 
   //TODO: use UnknownTableException
-  def recoverQuery[A](table: String, result: Task[A]) =
+  def recoverQuery[R, A](table: String, result: RIO[Dynamo, A]) =
     result.mapError {
       case _: ResourceNotFoundException =>
         new Exception(s"Table '$table' does not exist")
@@ -298,16 +264,9 @@ object Eval {
   def describeTable(
       dynamo: AmazonDynamoDBAsync,
       tableName: String
-  ): Task[TableDescription] =
+  ): RIO[Dynamo, TableDescription] =
     for {
-      result <- Dynamo.dynamoRequest(
-        dynamo.describeTableAsync(
-          _: DescribeTableRequest,
-          _: AsyncHandler[DescribeTableRequest, DescribeTableResult]
-        ),
-        new DescribeTableRequest()
-          .withTableName(tableName)
-      )
+      result <- Dynamo.describeTable(dynamo, tableName)
     } yield {
       val description = result.getTable
       val attributes =
@@ -365,21 +324,7 @@ object Eval {
     TableNames(
       ZStream.fromEffect(
         Timed(
-          Dynamo
-            .dynamoRequest(
-              dynamo.listTablesAsync(
-                _: ListTablesRequest,
-                _: AsyncHandler[ListTablesRequest, ListTablesResult]
-              ),
-              new ListTablesRequest()
-            )
-            // //TODO: time by page, and sum?
-            // def it = dynamo.listTables().pages().iterator().asScala.map {
-            //   _.iterator().asScala.map(_.getTableName).toList
-            // }
-            .map {
-              _.getTableNames.asScala.toList
-            }
+          Dynamo.listTables(dynamo)
         )
       )
     )
@@ -387,80 +332,61 @@ object Eval {
   def insert(
       dynamo: AmazonDynamoDBAsync,
       query: Insert
-  ): Task[Complete.type] = {
+  ): RIO[Dynamo, Complete.type] = {
     val item = query.values
       .foldLeft(Map[String, AttributeValue]()) {
         case (item, (field, value)) =>
           item.updated(field, toAttributeValue(value))
       }
-      .asJava
+    //TODO: timed
     Dynamo
-      .dynamoRequest(
-        dynamo.putItemAsync,
-        new PutItemRequest()
-          .withTableName(query.table)
-          .withItem(item)
-      )
+      .putItem(dynamo, query.table, item)
       .as(Complete)
   }
 
   //TODO: condition expression that item must exist?
-  def delete(dynamo: AmazonDynamoDBAsync, query: Delete): Task[Complete.type] =
+  def delete(
+      dynamo: AmazonDynamoDBAsync,
+      query: Delete
+  ): RIO[Dynamo, Complete.type] = {
     //TODO: optionally return consumed capacity
     //.getConsumedCapacity
+    val Key(hashKey, hashValue) = query.key.hash
+    val range = query.key.range.map {
+      case Key(rangeKey, rangeValue) => (rangeKey, toAttributeValue(rangeValue))
+    }
+    //TODO: timed
     Dynamo
-      .dynamoRequest(
-        dynamo.deleteItemAsync,
-        new DeleteItemRequest()
-          .withTableName(query.table)
-          .withKey(toKey(query.key))
+      .deleteItem(
+        dynamo,
+        tableName = query.table,
+        hash = (hashKey, toAttributeValue(hashValue)),
+        range = range
       )
       .as(Complete)
+  }
 
   //TODO: change response to more informative type
   def update(
       dynamo: AmazonDynamoDBAsync,
       query: Update
-  ): Task[Complete.type] =
+  ): RIO[Dynamo, Complete.type] =
     recoverQuery(
       query.table, {
-        val baseSpec = new UpdateItemRequest()
-          .withTableName(query.table)
-//        val expected = (Seq(hash) ++ range.toSeq)
-//          .map(key => key -> new ExpectedAttributeValue(key.field).exists())
-//          .toMap
-        val spec = baseSpec
-          .withKey(toKey(query.key))
-          .withUpdateExpression(
-            "set " +
-              query.fields
-                .map {
-                  case (key, _) =>
-                    s"#$key = :$key"
-                }
-                .mkString(", ")
-          )
-          .withExpressionAttributeNames(
-            query.fields
-              .map {
-                case (key, _) =>
-                  s"#$key" -> key
-              }
-              .toMap
-              .asJava
-          )
-          .withExpressionAttributeValues(
-            query.fields
-              .map {
-                case (key, value) =>
-                  s":$key" -> toAttributeValue(value)
-              }
-              .toMap
-              .asJava
-          )
-        // .withExpected(expected.asJava)
+        val Key(hashKey, hashValue) = query.key.hash
         Dynamo
-          .dynamoRequest(dynamo.updateItemAsync, spec)
+          .updateItem(
+            dynamo,
+            query.table,
+            hash = hashKey -> toAttributeValue(hashValue),
+            range = query.key.range.map {
+              case Key(rangeKey, rangeValue) =>
+                rangeKey -> toAttributeValue(rangeValue),
+            },
+            fields = query.fields.map {
+              case (key, value) => key -> toAttributeValue(value)
+            }
+          )
           .as(Complete)
       }
     )
@@ -469,19 +395,16 @@ object Eval {
       dynamo: AmazonDynamoDBAsync,
       query: Select,
       pageSize: Int,
-      tableCache: TableCache
-  ): Task[ResultSet] = {
+      tableCache: TableCache[Dynamo]
+  ): RIO[Dynamo, ResultSet] = {
     //TODO stream of pages
     def wrap[A](
         data: RIO[
-          Clock,
+          Env,
           Timed[java.util.List[java.util.Map[String, AttributeValue]]]
         ],
-        capacity: RIO[Clock, Option[() => ConsumedCapacity]]
+        capacity: RIO[Env, Option[() => ConsumedCapacity]]
     ) =
-//      val original: Iterator[Iterator[DynamoObject]] = Iterator {
-//        data.asScala.iterator.map(_.asScala.toMap)
-//      }
       ResultSet(
         //TODO: recoverQuery
         ZStream.fromIterableM(
@@ -491,45 +414,10 @@ object Eval {
             )
           }
         ),
-//        ZStream
-//          .fromIterator(
-//            Task.succeed(original))
-//          .map { value => Timed(value.toList, 0.seconds) },
         capacity
         //TODO:
         //Some(() => results.get  AccumulatedConsumedCapacity)
       )
-
-    def querySpec(keyFields: Seq[String]) = {
-      val spec = new QueryRequest()
-        .withReturnConsumedCapacity(ReturnConsumedCapacity.INDEXES)
-        .withTableName(query.from)
-
-      val (aggregates, fields) = resolveProjection(query.projection)
-      val allFields = keyFields ++ fields
-      def toKey(field: String) = s"#$field"
-      val fieldsKeys = fields.map(toKey)
-      val keys = keyFields.map(toKey) ++ fieldsKeys
-      val withFields = if (fields.nonEmpty) {
-        spec
-          .withProjectionExpression(fieldsKeys.mkString(","))
-      } else spec
-      val withProjection = if (allFields.nonEmpty) {
-        withFields.withExpressionAttributeNames(
-          keys.zip(allFields).distinct.toMap.asJava
-        )
-      } else withFields
-
-      (
-        aggregates,
-        query.limit
-          .fold(withProjection)(limit => withProjection.withLimit(limit))
-          // .withMaxPageSize(pageSize)
-          .withScanIndexForward(
-            scanForward(query.orderBy.flatMap(_.direction))
-          )
-      )
-    }
 
     def querySingle(
         tableDescription: TableDescription,
@@ -560,24 +448,18 @@ object Eval {
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
       def queryIndex(index: Index) =
         validateKeys(index).map { _ =>
-          val (aggregates, spec) = querySpec(Seq(hashKey, rangeKey))
+          val (aggregates, fields) = resolveProjection(query.projection)
           val results = Timed(
-            Dynamo.dynamoRequest(
-              dynamo.queryAsync,
-              spec
-                .withTableName(query.from)
-                .withIndexName(index.name)
-                .withKeyConditionExpression(
-                  s"#$hashKey = :$hashKey and #$rangeKey= :$rangeKey"
-                )
-                .withExpressionAttributeValues(
-                  Map(
-                    s":$hashKey" -> toAttributeValue(hashValue),
-                    s":$rangeKey" -> toAttributeValue(rangeValue)
-                  ).asJava
-                )
+            Dynamo.query(
+              dynamo,
+              tableName = query.from,
+              hash = (hashKey, toAttributeValue(hashValue)),
+              range = Some(rangeKey -> toAttributeValue(rangeValue)),
+              index = Some(index.name),
+              fields = fields,
+              limit = query.limit,
               //TODO: support order by on index queries?
-              //.withScanIndexForward()
+              scanForward = true
             )
           )
           (
@@ -589,32 +471,20 @@ object Eval {
           )
         }
 
-      def getItem(tableDescription: TableDescription) =
+      def getItem(tableDescription: TableDescription) = {
+        val Key(hashKey, hashValue) = hash
+        val Key(rangeKey, rangeValue) = range
+        val (aggregates, fields) = resolveProjection(query.projection)
         validateKeys(tableDescription).map { _ =>
-          val spec = new GetItemRequest()
-            .withTableName(query.from)
-          val withKey = spec.withKey(toKey(Ast.PrimaryKey(hash, Some(range))))
-          val (aggregates, fields) = resolveProjection(query.projection)
-          val withFields = if (fields.nonEmpty) {
-            val keys = fields.map(field => s"#$field")
-            withKey
-              .withProjectionExpression(keys.mkString(","))
-              .withExpressionAttributeNames(
-                keys.zip(fields).toMap.asJava
-              )
-          } else spec
-
           val results = Timed(
-            Dynamo
-              .dynamoRequest(dynamo.getItemAsync, withFields)
+            Dynamo.getItem(
+              dynamo,
+              tableName = query.from,
+              hash = hashKey -> toAttributeValue(hashValue),
+              range = rangeKey -> toAttributeValue(rangeValue),
+              fields = fields
+            )
           )
-          //          .map { data =>
-          //            ResultSet(
-          //              ZStream.fromEffect(
-          //                  Task(Option(data.getItem).toList.map(_.asScala.toMap))
-          //              )
-          //            )
-          //          }
           (
             aggregates,
             wrap(
@@ -623,6 +493,7 @@ object Eval {
             )
           )
         }
+      }
 
       val getIndex = query.useIndex
         .map(value =>
@@ -661,10 +532,9 @@ object Eval {
         field: String,
         value: KeyValue
     ) = {
-      val (aggregates, spec) = querySpec(Seq(field))
+      val (aggregates, fields) = resolveProjection(query.projection)
 
-      val results
-          : ZIO[Any, Throwable, RIO[Clock, Timed[QueryResult]]] = query.useIndex
+      val results = query.useIndex
         .map(value =>
           validateIndex(tableDescription, value, field, None).map(Option.apply)
         )
@@ -688,48 +558,42 @@ object Eval {
           }
         }
         .map { maybeIndex =>
-          maybeIndex
-            .map { index =>
-              validateOrderBy(index.hash, index.range, query.orderBy)
-              //toAliasedKey(Ast.PrimaryKey(Key(index.hash, index.range))
-              Timed(
-                Dynamo.dynamoRequest(
-                  dynamo.queryAsync,
-                  spec
-                    .withKeyConditionExpression(
-                      s"#$field = :$field"
-                    )
-                    .withExpressionAttributeValues(
-                      Map(
-                        s":$field" -> toAttributeValue(value)
-                      ).asJava
-                    )
-                    .withIndexName(index.name)
-                )
-              )
-            }
-            .getOrElse {
-              validateOrderBy(
-                tableDescription.hash,
-                tableDescription.range,
-                query.orderBy
-              )
-              Timed(
-                Dynamo
-                  .dynamoRequest(
-                    dynamo.queryAsync,
-                    spec
-                      .withKeyConditionExpression(
-                        s"#$field = :$field"
-                      )
-                      .withExpressionAttributeValues(
-                        Map(
-                          s":$field" -> toAttributeValue(value)
-                        ).asJava
-                      )
+          Timed(
+            maybeIndex
+              .map { index =>
+                validateOrderBy(index.hash, index.range, query.orderBy) *>
+                  Dynamo.query(
+                    dynamo,
+                    tableName = query.from,
+                    hash = (field, toAttributeValue(value)),
+                    range = None,
+                    index = Some(index.name),
+                    fields = fields,
+                    limit = query.limit,
+                    scanForward =
+                      scanForward(query.orderBy.flatMap(_.direction))
                   )
-              )
-            }
+              }
+              .getOrElse {
+                validateOrderBy(
+                  tableDescription.hash,
+                  tableDescription.range,
+                  query.orderBy
+                ) *>
+                  //TODO: combine with above (just return index
+                  Dynamo.query(
+                    dynamo,
+                    tableName = query.from,
+                    hash = (field, toAttributeValue(value)),
+                    range = None,
+                    index = None,
+                    fields = fields,
+                    limit = query.limit,
+                    scanForward =
+                      scanForward(query.orderBy.flatMap(_.direction))
+                  )
+              }
+          )
         }
       results.map { results =>
         (
@@ -744,20 +608,10 @@ object Eval {
 
     def scan() = {
       //TODO: scan doesn't support order (because doesn't on hash key?)
-      val spec = new ScanRequest()
-        .withTableName(query.from)
       val (aggregates, fields) = resolveProjection(query.projection)
-      val withFields = if (fields.nonEmpty) {
-        val keys = fields.map(field => s"#$field")
-        spec
-          .withProjectionExpression(keys.mkString(","))
-          .withExpressionAttributeNames(
-            keys.zip(fields).toMap.asJava
-          )
-      } else spec
-      val withLimit = query.limit
-        .fold(withFields)(limit => withFields.withLimit(limit))
-      val results = Timed(Dynamo.dynamoRequest(dynamo.scanAsync, withLimit))
+      val results = Timed(
+        Dynamo.scan(dynamo, query.from, fields, limit = query.limit)
+      )
       (
         aggregates,
         wrap(
