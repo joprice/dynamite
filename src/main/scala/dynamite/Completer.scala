@@ -1,12 +1,15 @@
 package dynamite
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
+
 import dynamite.Response.TableNames
 import jline.console.ConsoleReader
 import jline.console.completer._
 import Parser._
 import fastparse._
 import NoWhitespace._
+import dynamite.Dynamo.Dynamo
+
 import scala.jdk.CollectionConverters._
 
 object Completer {
@@ -27,11 +30,12 @@ object Completer {
     Files.write(path, (s + "\n").getBytes(), StandardOpenOption.APPEND)
 
   class TableNamesCompleter(
+      runtime: zio.Runtime[Eval.Env],
       loadTables: TableNames
   ) extends StringsCompleter {
     //TODO: refresh cache and only cache when not failed, since automatic or manual?
     lazy val tableNames = {
-      val names = zio.Runtime.default
+      val names = runtime
         .unsafeRun(
           loadTables.names.runCollect
             .map { tables =>
@@ -61,8 +65,9 @@ object Completer {
     }
 
   class FieldsCompleter(
+      runtime: zio.Runtime[Eval.Env],
       reader: ConsoleReader,
-      tableCache: TableCache
+      tableCache: TableCache[Dynamo]
   ) extends Completer {
     def keyNames(reader: ConsoleReader) = {
       fastparse.parse(reader.getCursorBuffer.buffer.toString, tableParser(_)) match {
@@ -71,7 +76,7 @@ object Completer {
       }
     }.fold(Seq.empty[String]) { name =>
       //TODO: pass runtime
-      zio.Runtime.default
+      runtime
         .unsafeRun(
           tableCache
             .get(name)
@@ -90,12 +95,13 @@ object Completer {
   }
 
   def apply(
+      runtime: zio.Runtime[Eval.Env],
       reader: ConsoleReader,
-      tableCache: TableCache,
+      tableCache: TableCache[Dynamo],
       showTables: TableNames
   ) = {
-    val tableNames = new TableNamesCompleter(showTables)
-    val fields = new FieldsCompleter(reader, tableCache)
+    val tableNames = new TableNamesCompleter(runtime, showTables)
+    val fields = new FieldsCompleter(runtime, reader, tableCache)
 
     new AggregateCompleter(
       new ArgumentCompleter(

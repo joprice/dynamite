@@ -25,8 +25,6 @@ import zio.config.Config
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsyncClientBuilder
 import java.io.{Closeable, File, PrintWriter, StringWriter}
-
-import zio.clock.Clock
 import zio.stream.ZStream
 
 import scala.jdk.CollectionConverters._
@@ -129,11 +127,11 @@ object Repl {
       reader: Reader,
       format: Ast.Format,
       paging: ResultPage
-  ): RIO[Clock, ResultPage] = {
+  ): RIO[Eval.Env, ResultPage] = {
     reader.clearPrompt()
     reader.disableEcho()
 
-    handlePage[Clock, PageType](out, paging, reader) {
+    handlePage[Eval.Env, PageType](out, paging, reader) {
       case PageType.TablePaging(select, values) =>
         //TODO: offer vertical printing method
         format match {
@@ -170,7 +168,7 @@ object Repl {
       reader: Reader,
       format: Ast.Format,
       page: ResultPage
-  ): RIO[Clock, Unit] = {
+  ): RIO[Eval.Env, Unit] = {
     for {
       paging <- renderPage(out, reader, format, page)
       () <- Task(out.flush())
@@ -199,7 +197,7 @@ object Repl {
       format: Ast.Format,
       query: Ast.Command,
       results: Response
-  ): RIO[Clock, Unit] = (query, results) match {
+  ): RIO[Eval.Env, Unit] = (query, results) match {
     case (select: Ast.Select, Response.ResultSet(resultSet, _)) =>
       // TODO: completion: success/failure, time, result count, indicate empty?
       //TODO: add flag with query cost
@@ -241,8 +239,8 @@ object Repl {
       out: PrintWriter,
       reader: Reader,
       format: Ast.Format,
-      eval: Ast.Query => Task[Response]
-  ): RIO[Logging with Clock, Unit] = {
+      eval: Ast.Query => RIO[Eval.Env, Response]
+  ): RIO[Logging with Eval.Env, Unit] = {
     val line = reader.readLine()
 
     if (line != null) {
@@ -311,12 +309,13 @@ object Repl {
   }
 
   def apply(
+      runtime: Runtime[Eval.Env],
       opts: Opts
-  ): ZIO[Console with Config[DynamiteConfig] with Logging with Clock, Throwable, Unit] =
+  ): ZIO[Console with Config[DynamiteConfig] with Logging with Eval.Env, Throwable, Unit] =
     Script.withClient(opts).use { client =>
       for {
         config <- ZIO.access[Config[DynamiteConfig]](_.get)
-        result <- run(client, config)
+        result <- run(runtime, client, config)
       } yield result
     }
 
@@ -329,7 +328,11 @@ object Repl {
       history
     }(_.flush())
 
-  def run(client: AmazonDynamoDBAsync, config: DynamiteConfig) =
+  def run(
+      runtime: zio.Runtime[Eval.Env],
+      client: AmazonDynamoDBAsync,
+      config: DynamiteConfig
+  ) =
     reader
       .flatMap(reader => history(config.historyFile, reader).as(reader))
       .use { reader =>
@@ -345,7 +348,7 @@ object Repl {
             jLineReader.resetPrompt()
             reader.setExpandEvents(false)
             reader.addCompleter(
-              Completer(reader, tableCache, Eval.showTables(client))
+              Completer(runtime, reader, tableCache, Eval.showTables(client))
             )
 
             val out = new PrintWriter(reader.getOutput)

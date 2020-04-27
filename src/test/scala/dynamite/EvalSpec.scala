@@ -6,6 +6,7 @@ import com.amazonaws.services.dynamodbv2.model.{
   ResourceNotFoundException,
   ScalarAttributeType
 }
+import dynamite.Dynamo.Dynamo
 import dynamite.Eval.{
   AmbiguousIndexException,
   InvalidHashKeyException,
@@ -17,7 +18,6 @@ import dynamite.Eval.{
 }
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
 import play.api.libs.json.{JsValue, Json}
-import zio.clock.Clock
 import zio.random.Random
 import zio.{Has, Task, ZIO, ZLayer, ZManaged}
 import zio.test.{TestAspect, _}
@@ -50,7 +50,9 @@ object EvalSpec extends DefaultRunnableSpec {
 
   type DynamoClient = Has[AmazonDynamoDBAsync]
 
-  def run(query: String): ZIO[Random with DynamoClient, Throwable, Response] =
+  def run(
+      query: String
+  ): ZIO[Random with DynamoClient with Dynamo, Throwable, Response] =
     ZManaged
       .access[DynamoClient](_.get)
       .use { client =>
@@ -66,7 +68,7 @@ object EvalSpec extends DefaultRunnableSpec {
   def validate(
       query: String,
       expected: List[List[JsValue]]
-  ): ZIO[Random with DynamoClient with Clock, Throwable, TestResult] =
+  ): ZIO[Random with DynamoClient with Eval.Env, Throwable, TestResult] =
     run(query)
       .flatMap {
         case Response.ResultSet(pages, _) =>
@@ -499,7 +501,7 @@ object EvalSpec extends DefaultRunnableSpec {
       createTables
         .map(_ => ZIO.succeed(_: TestSuccess))
         .mapError(TestFailure.die)
-    ) provideCustomLayerShared ZLayer
+    ) provideCustomLayerShared (ZLayer
       .fromManaged(dynamoClient)
-      .orDie
+      ++ Dynamo.live).orDie
 }

@@ -273,6 +273,6 @@ object ScriptSpec extends DefaultRunnableSpec {
 //      Script.eval(Opts(), input, client)
 //      assert(result)(isLeft(equalTo(error)))
 //    }
-    ) @@ TestAspect.sequential
+    ).provideCustomLayer(Dynamo.live) @@ TestAspect.sequential
 
 }
