@@ -368,7 +368,7 @@ object Eval {
             hash = hashKey -> toAttributeValue(hashValue),
             range = query.key.range.map {
               case Key(rangeKey, rangeValue) =>
-                rangeKey -> toAttributeValue(rangeValue),
+                rangeKey -> toAttributeValue(rangeValue)
             },
             fields = query.fields.map {
               case (key, value) => key -> toAttributeValue(value)

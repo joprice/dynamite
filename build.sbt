@@ -6,7 +6,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.13.1"
+scalaVersion := "2.13.2"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -21,7 +21,7 @@ addCommandAlias(
   ).mkString(";", ";", "")
 )
 
-val awsVersion = "1.11.764"
+val awsVersion = "1.11.770"
 
 fork := true
 
@@ -76,7 +76,7 @@ libraryDependencies ++= Seq(
   "dev.zio" %% "zio-streams" % zioVersion,
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
-  "com.typesafe.play" %% "play-json" % "2.7.4",
+  "com.typesafe.play" %% "play-json" % "2.8.1",
   "com.amazonaws" % "DynamoDBLocal" % "1.12.0" % Test,
   "com.almworks.sqlite4java" % "sqlite4java" % "1.0.392" % Test,
   "com.almworks.sqlite4java" % "libsqlite4java-osx" % "1.0.392" % Test artifacts (Artifact(
