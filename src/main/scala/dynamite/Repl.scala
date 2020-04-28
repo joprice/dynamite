@@ -1,7 +1,5 @@
 package dynamite
 
-import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
-import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.dynamodbv2.model.{
   AttributeValue,
   ScalarAttributeType
@@ -11,22 +9,15 @@ import dynamite.Dynamo.DynamoObject
 import jline.console.ConsoleReader
 import jline.console.history.FileHistory
 import zio.logging.Logging
-
-import scala.concurrent.duration._
 import dynamite.Ast._
 import dynamite.Parser.ParseException
 import dynamite.Response.{KeySchema, Paged, ResultPage}
 import fansi._
-import com.amazonaws.auth.profile.ProfileCredentialsProvider
-import com.amazonaws.auth.AWSCredentialsProvider
 import zio._
 import zio.console.{putStrLn, Console}
 import zio.config.Config
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsyncClientBuilder
 import java.io.{Closeable, File, PrintWriter, StringWriter}
 import zio.stream.ZStream
-
 import scala.jdk.CollectionConverters._
 
 object Repl {
@@ -308,16 +299,15 @@ object Repl {
     } else Task.unit
   }
 
-  def apply(
-      runtime: Runtime[Eval.Env],
-      opts: Opts
-  ): ZIO[Console with Config[DynamiteConfig] with Logging with Eval.Env, Throwable, Unit] =
-    Script.withClient(opts).use { client =>
-      for {
-        config <- ZIO.access[Config[DynamiteConfig]](_.get)
-        result <- run(runtime, client, config)
-      } yield result
-    }
+  def apply(runtime: Runtime[Eval.Env]): ZIO[
+    Console with Has[DynamiteConfig] with Logging with Eval.Env,
+    Throwable,
+    Unit
+  ] =
+    for {
+      config <- ZIO.access[Config[DynamiteConfig]](_.get)
+      result <- run(runtime, config)
+    } yield result
 
   val reader = ZManaged.fromAutoCloseable(ZIO.succeed(new ConsoleReader))
 
@@ -330,7 +320,6 @@ object Repl {
 
   def run(
       runtime: zio.Runtime[Eval.Env],
-      client: AmazonDynamoDBAsync,
       config: DynamiteConfig
   ) =
     reader
@@ -339,16 +328,16 @@ object Repl {
         for {
           _ <- putStrLn(s"${Opts.appName} v${dynamite.BuildInfo.version}")
           result <- {
-            val tableCache = new TableCache(Eval.describeTable(client, _))
+            val tableCache = new TableCache(Eval.describeTable)
 
             def run(query: Ast.Query) =
-              Eval(client, query, tableCache, pageSize = config.pageSize)
+              Eval(query, tableCache, pageSize = config.pageSize)
 
             val jLineReader = new JLineReader(reader)
             jLineReader.resetPrompt()
             reader.setExpandEvents(false)
             reader.addCompleter(
-              Completer(runtime, reader, tableCache, Eval.showTables(client))
+              Completer(runtime, reader, tableCache, Eval.showTables)
             )
 
             val out = new PrintWriter(reader.getOutput)
@@ -468,36 +457,6 @@ object Repl {
   }
 
   //TODO: improve connection errors - check dynamo listening on provided port
-
-  def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDBAsync = {
-    val endpoint = opts.endpoint.orElse(config.endpoint)
-    val credentials = opts.profile.map {
-      new ProfileCredentialsProvider(_)
-    }
-    dynamoClient(endpoint, credentials)
-  }
-
-  def dynamoClient(
-      endpoint: Option[String],
-      credentials: Option[AWSCredentialsProvider]
-  ): AmazonDynamoDBAsync = {
-    val clientConfig = new ClientConfiguration()
-      .withConnectionTimeout(1.second.toMillis.toInt)
-      .withSocketTimeout(1.second.toMillis.toInt)
-    val builder = AmazonDynamoDBAsyncClientBuilder
-      .standard()
-      .withClientConfiguration(clientConfig)
-    val withEndpoint = endpoint.fold(builder) { endpoint =>
-      builder.withEndpointConfiguration(
-        new EndpointConfiguration(endpoint, builder.getRegion)
-      )
-    }
-    credentials
-      .fold(withEndpoint) { credentials =>
-        withEndpoint.withCredentials(credentials)
-      }
-      .build()
-  }
 
   def errorLine(line: String, errorIndex: Int) = {
     val to = {

@@ -11,6 +11,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 import dynamite.Ast.{DescribeTable, ShowTables}
 import dynamite.Ast.Projection.FieldSelector.{All, Field}
 import dynamite.Response.{Index, KeySchema}
+import dynamite.ScriptSpec.dynamoClient
 import fansi.{Bold, Str}
 import jline.internal.Ansi
 import zio.{Task, ZIO, ZManaged}
@@ -535,5 +536,10 @@ object ReplSpec extends DefaultRunnableSpec {
           )
         )
       )
-    ).provideSomeLayer(Logging.ignore ++ TestClock.default ++ Dynamo.live) @@ TestAspect.sequential
+    ).provideSomeLayerShared(
+      (
+        Logging.ignore ++ TestClock.default ++
+          (dynamoClient >>> Dynamo.live)
+      ).orDie
+    ) @@ TestAspect.sequential
 }

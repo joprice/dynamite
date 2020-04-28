@@ -2,8 +2,10 @@ package dynamite
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
+import dynamite.Dynamo.DynamoClient
+import zio.ZIO
 import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
-import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBAsync}
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.model.{
   AttributeDefinition,
   AttributeValue,
@@ -13,11 +15,10 @@ import com.amazonaws.services.dynamodbv2.model.{
   ScalarAttributeType
 }
 import zio.test.environment.TestConsole
-import zio.{Task, ZManaged}
+import zio.{Task, ZLayer, ZManaged}
 import zio.test._
 import zio.test.Assertion._
 import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
-
 import scala.jdk.CollectionConverters._
 
 object ScriptSpec extends DefaultRunnableSpec {
@@ -76,6 +77,13 @@ object ScriptSpec extends DefaultRunnableSpec {
       .map(_ + minPort)
   }
 
+  val dynamoClient =
+    ZLayer.fromManaged(
+      ZManaged
+        .fromEffect(randomPort)
+        .flatMap(port => dynamoServer(port) *> dynamoLocalClient(port))
+    )
+
   def dynamoServer(port: Int) =
     ZManaged.makeEffect {
       val localArgs = Array("-inMemory", s"-port", s"$port")
@@ -86,7 +94,7 @@ object ScriptSpec extends DefaultRunnableSpec {
 
   def dynamoLocalClient(port: Int) =
     ZManaged.makeEffect(
-      Repl
+      Dynamo
         .dynamoClient(
           endpoint = Some(s"http://localhost:$port"),
           credentials = Some(
@@ -95,11 +103,6 @@ object ScriptSpec extends DefaultRunnableSpec {
         )
     )(_.shutdown())
 
-  val dynamoClient =
-    ZManaged
-      .fromEffect(randomPort)
-      .flatMap(port => dynamoServer(port) *> dynamoLocalClient(port))
-
   def captureStdOut[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
     val result = Console.withOut(os)(f)
@@ -107,17 +110,15 @@ object ScriptSpec extends DefaultRunnableSpec {
     (output, result)
   }
 
-  def insertRows(client: AmazonDynamoDBAsync) =
+  val insertRows =
     for {
       _ <- Dynamo.putItem(
-        client,
         "playlists",
         Map(
           "id" -> new AttributeValue("123")
         )
       )
       _ <- Dynamo.putItem(
-        client,
         "playlists",
         Map(
           "id" -> new AttributeValue("456")
@@ -126,7 +127,8 @@ object ScriptSpec extends DefaultRunnableSpec {
     } yield ()
 
   val withPlaylistTable =
-    dynamoClient
+    ZManaged
+      .access[DynamoClient](_.get)
       .flatMap(client =>
         withTable("playlists")("id" -> ScalarAttributeType.S)(
           client
@@ -137,16 +139,11 @@ object ScriptSpec extends DefaultRunnableSpec {
     suite("script")(
       testM("fail with error message") {
         val input = "select * from playlists limit 1"
-        dynamoClient
-          .flatMap(client =>
-            withTable("playlists")("id" -> ScalarAttributeType.S)(
-              client
-            ).as(client)
-          )
+        withPlaylistTable
           .use { client =>
             for {
-              _ <- insertRows(client)
-              () <- Script.eval(Opts(), input, client)
+              _ <- insertRows
+              () <- Script.eval(Opts(), input)
               output <- TestConsole.output
             } yield {
               assert(output)(
@@ -163,23 +160,22 @@ object ScriptSpec extends DefaultRunnableSpec {
       },
       testM("render as json") {
         val input = "select * from playlists limit 2"
-        withPlaylistTable.use {
-          client =>
-            for {
-              _ <- insertRows(client)
-              () <- Script.eval(Opts(format = Format.Json), input, client)
-              output <- TestConsole.output
-            } yield {
-              assert(output)(
-                equalTo(
-                  Vector(
-                    """{"id":"456"}
+        withPlaylistTable.use { client =>
+          for {
+            _ <- insertRows
+            () <- Script.eval(Opts(format = Format.Json), input)
+            output <- TestConsole.output
+          } yield {
+            assert(output)(
+              equalTo(
+                Vector(
+                  """{"id":"456"}
                      |{"id":"123"}
                      |""".stripMargin
-                  )
                 )
               )
-            }
+            )
+          }
         }
       },
       testM("render as json-pretty") {
@@ -187,8 +183,8 @@ object ScriptSpec extends DefaultRunnableSpec {
           client =>
             val input = "select * from playlists limit 2"
             for {
-              _ <- insertRows(client)
-              () <- Script.eval(Opts(format = Format.JsonPretty), input, client)
+              _ <- insertRows
+              () <- Script.eval(Opts(format = Format.JsonPretty), input)
               output <- TestConsole.output
             } yield {
               assert(output)(
@@ -209,22 +205,21 @@ object ScriptSpec extends DefaultRunnableSpec {
       },
       testM("render an error when parsing fails") {
         val input = "select * from playlists limid"
-        dynamoClient.use {
-          client =>
-            for {
-              message <- Script
-                .eval(Opts(format = Format.JsonPretty), input, client)
-                .flip
-                .map(_.getMessage)
-            } yield {
-              assert(message)(
-                equalTo(
-                  """[error] Failed to parse query
+        for {
+          client <- ZIO
+            .access[DynamoClient](_.get)
+          message <- Script
+            .eval(Opts(format = Format.JsonPretty), input)
+            .flip
+            .map(_.getMessage)
+        } yield {
+          assert(message)(
+            equalTo(
+              """[error] Failed to parse query
                      |select * from playlists limid
                      |                        ^""".stripMargin
-                )
-              )
-            }
+            )
+          )
         }
       },
       testM("render table names") {
@@ -237,7 +232,7 @@ object ScriptSpec extends DefaultRunnableSpec {
           .use { client =>
             val input = "show tables"
             for {
-              () <- Script.eval(Opts(), input, client)
+              () <- Script.eval(Opts(), input)
               output <- TestConsole.output
             } yield {
               assert(output)(
@@ -273,6 +268,9 @@ object ScriptSpec extends DefaultRunnableSpec {
 //      Script.eval(Opts(), input, client)
 //      assert(result)(isLeft(equalTo(error)))
 //    }
-    ).provideCustomLayer(Dynamo.live) @@ TestAspect.sequential
+    ) @@ TestAspect.sequential @@
+      TestAspect.before(TestConsole.clearOutput) provideCustomLayerShared (
+      (dynamoClient >>> Dynamo.live.passthrough).orDie
+    )
 
 }
