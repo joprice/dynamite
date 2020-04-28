@@ -6,9 +6,11 @@ import zio._
 import zio.config.Config
 import com.amazonaws.services.dynamodbv2.model.AttributeValue
 import dynamite.Dynamo.DynamoObject
+import dynamite.Response.Complete
 import zio.console.{putStrLn, Console}
 import zio.stream._
 import play.api.libs.json.{Format => _, _}
+
 import scala.jdk.CollectionConverters._
 
 object Script {
@@ -94,12 +96,17 @@ object Script {
       result <- eval(opts, input)
     } yield result
 
-  def eval(
+  def eval(opts: Opts, input: String) =
+    ZIO.foreach_(input.split(';').map(_.trim).filter(_.nonEmpty))(
+      evalLine(opts, _)
+    )
+
+  def evalLine(
       opts: Opts,
       input: String
   ): ZIO[Console with Eval.Env, Throwable, Unit] =
     Parser
-      .parse(input.trim.stripSuffix(";"))
+      .parse(input.trim)
       .fold(
         failure =>
           Task.fail(
@@ -128,9 +135,8 @@ object Script {
                   case (DescribeTable(_), Response.TableNames(_)) =>
                     Task.unit
                   case (_, Response.Info(message)) =>
-                    putStrLn(message) *>
-                      Task.unit
-                  case (_: Insert, _) =>
+                    putStrLn(message).unit
+                  case (_: Insert, _) | (_, Complete) =>
                     Task.unit
                   case unhandled =>
                     Task.fail(new Exception(s"unhandled response $unhandled"))

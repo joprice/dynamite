@@ -4,7 +4,11 @@ import scala.concurrent.duration._
 import com.amazonaws.auth.AWSCredentialsProvider
 import com.amazonaws.auth.profile.ProfileCredentialsProvider
 import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration
-import com.amazonaws.{AmazonWebServiceRequest, ClientConfiguration}
+import com.amazonaws.{
+  AmazonWebServiceRequest,
+  ClientConfiguration,
+  SdkClientException
+}
 import com.amazonaws.handlers.AsyncHandler
 import com.amazonaws.services.dynamodbv2.{
   AmazonDynamoDBAsync,
@@ -25,14 +29,16 @@ import com.amazonaws.services.dynamodbv2.model.{
   Update => _,
   _
 }
+import org.apache.http.conn.HttpHostConnectException
 import zio.config.Config
+import zio.stream.ZStream
 
 object Dynamo {
   type DynamoObject = Map[String, AttributeValue]
-  type Result[A] = IO[AmazonDynamoDBException, A]
+  type Result[A] = IO[Exception, A]
   type Dynamo = Has[Service]
   type DynamoClient = Has[AmazonDynamoDBAsync]
-  type ServiceResult[A] = ZIO[Dynamo, AmazonDynamoDBException, A]
+  type ServiceResult[A] = ZIO[Dynamo, Exception, A]
   type Key = (String, AttributeValue)
 
   def dynamoClient(config: DynamiteConfig, opts: Opts): AmazonDynamoDBAsync = {
@@ -78,12 +84,17 @@ object Dynamo {
 
   trait Service {
 
+    def createTable(
+        tableName: String,
+        hash: (String, ScalarAttributeType),
+        range: Option[(String, ScalarAttributeType)]
+    ): Result[CreateTableResult]
+
     def describeTable(
         tableName: String
     ): Result[DescribeTableResult]
 
-    def listTables(
-        ): Result[List[String]]
+    def listTables: zio.stream.Stream[Exception, List[String]]
 
     def scan(
         tableName: String,
@@ -141,13 +152,22 @@ object Dynamo {
   final private def dynamoRequest[A <: AmazonWebServiceRequest, B](
       f: (A, AsyncHandler[A, B]) => java.util.concurrent.Future[B],
       req: A
-  ): IO[AmazonDynamoDBException, B] =
-    IO.effectAsync[AmazonDynamoDBException, B] { cb =>
+  ): IO[Exception, B] =
+    IO.effectAsync[Exception, B] { cb =>
       val handler = new AsyncHandler[A, B] {
         def onError(exception: Exception): Unit =
           exception match {
             case e: AmazonDynamoDBException => cb(IO.fail(e))
-            case t                          => cb(IO.die(t))
+            case e: SdkClientException =>
+              cb(
+                Option(e.getCause)
+                  .collect {
+                    case ex: HttpHostConnectException =>
+                      IO.fail(ex)
+                  }
+                  .getOrElse(IO.die(e))
+              )
+            case t => cb(IO.die(t))
           }
 
         def onSuccess(request: A, result: B): Unit =
@@ -171,24 +191,33 @@ object Dynamo {
             .withTableName(tableName)
         )
 
-      //TODO: paginate using ZStream
-      def listTables(
-          ) =
-        Dynamo
-          .dynamoRequest(
-            dynamo.listTablesAsync(
-              _: ListTablesRequest,
-              _: AsyncHandler[ListTablesRequest, ListTablesResult]
-            ),
-            new ListTablesRequest()
-          )
-          // //TODO: time by page, and sum?
-          // def it = dynamo.listTables().pages().iterator().asScala.map {
-          //   _.iterator().asScala.map(_.getTableName).toList
-          // }
-          .map {
-            _.getTableNames.asScala.toList
+      def listTables = {
+        def loadPage(startTable: Option[String]) =
+          Dynamo
+            .dynamoRequest(
+              dynamo.listTablesAsync(
+                _: ListTablesRequest,
+                _: AsyncHandler[ListTablesRequest, ListTablesResult]
+              ),
+              new ListTablesRequest()
+                .tapOpt(startTable)(identity)(
+                  _.withExclusiveStartTableName(_)
+                )
+            )
+
+        ZStream.paginateM(Left(()): Either[Unit, String]) { value =>
+          for {
+            result <- value match {
+              case Left(())   => loadPage(None)
+              case Right(key) => loadPage(Some(key))
+            }
+          } yield {
+            val tables = result.getTableNames.asScala.toList
+            val key = Option(result.getLastEvaluatedTableName)
+            (tables, key.map(Right(_)))
           }
+        }
+      }
 
       def scan(
           tableName: String,
@@ -330,6 +359,45 @@ object Dynamo {
             )
         )
 
+      def createTable(
+          tableName: String,
+          hash: (String, ScalarAttributeType),
+          range: Option[(String, ScalarAttributeType)]
+      ) = {
+        val (schemas, attributes) = (
+          (hash, KeyType.HASH) :: range.map(_ -> KeyType.RANGE).toList
+        ).map {
+          case ((name, tpe), keyType) =>
+            val schema = new KeySchemaElement()
+              .withAttributeName(name)
+              .withKeyType(keyType)
+            val attribute = new AttributeDefinition()
+              .withAttributeName(name)
+              .withAttributeType(tpe)
+            (schema, attribute)
+        }.unzip
+        dynamoRequest(
+          dynamo.createTableAsync,
+          new CreateTableRequest()
+            .withTableName(tableName)
+            .withAttributeDefinitions(
+              attributes: _*
+            )
+            .withKeySchema(
+              schemas: _*
+            )
+            .withProvisionedThroughput(
+              new ProvisionedThroughput()
+                .withReadCapacityUnits(1L)
+                .withWriteCapacityUnits(1L)
+            )
+        ).mapError {
+          case _: ResourceInUseException =>
+            new Exception(s"Table $tableName already exists")
+          case error => error
+        }
+      }
+
       def updateItem(
           tableName: String,
           hash: Key,
@@ -384,8 +452,8 @@ object Dynamo {
   ): ServiceResult[DescribeTableResult] =
     ZIO.accessM[Dynamo](_.get.describeTable(tableName))
 
-  def listTables: ServiceResult[List[String]] =
-    ZIO.accessM[Dynamo](_.get.listTables())
+  def listTables: ZStream[Dynamo, Exception, List[String]] =
+    ZStream.accessStream[Dynamo](_.get.listTables)
 
   def scan(
       tableName: String,
@@ -442,15 +510,22 @@ object Dynamo {
   ): ServiceResult[DeleteItemResult] =
     ZIO.accessM[Dynamo](_.get.deleteItem(tableName, hash, range))
 
-  val access = ZIO.accessM[Dynamo]
-
   def updateItem(
       tableName: String,
       hash: Key,
       range: Option[Key],
       fields: Seq[(String, AttributeValue)]
   ): ServiceResult[UpdateItemResult] =
-    access(
+    ZIO.accessM[Dynamo](
       _.get.updateItem(tableName, hash, range, fields)
+    )
+
+  def createTable(
+      tableName: String,
+      hash: (String, ScalarAttributeType),
+      range: Option[(String, ScalarAttributeType)]
+  ): ServiceResult[CreateTableResult] =
+    ZIO.accessM[Dynamo](
+      _.get.createTable(tableName, hash, range)
     )
 }

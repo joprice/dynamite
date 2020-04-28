@@ -18,8 +18,9 @@ import dynamite.Eval.{
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
 import play.api.libs.json.{JsValue, Json}
 import zio.random.Random
+import zio.stream.ZStream
 import zio.{Has, Task, ZIO, ZManaged}
-import zio.test.{TestAspect, _}
+import zio.test._
 import zio.test.Assertion._
 
 object EvalSpec extends DefaultRunnableSpec {
@@ -96,6 +97,26 @@ object EvalSpec extends DefaultRunnableSpec {
             )
           )
         )
+      },
+      testM("create table") {
+        for {
+          _ <- run(query = s"create table users (userId string)")
+          _ <- run(query = s"create table products (userId string)")
+          tables <- ZStream.accessStream[Dynamo](_.get.listTables).runCollect
+        } yield {
+          assert(tables)(
+            equalTo(
+              List(
+                List(
+                  "eval-spec",
+                  "eval-spec-range-key",
+                  "products",
+                  "users"
+                )
+              )
+            )
+          )
+        }
       },
       testM("allow selecting all fields") {
         validate(s"select * from $tableName", List(Seed.seedData))
