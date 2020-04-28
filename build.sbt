@@ -161,7 +161,7 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
-addCompilerPlugin("io.tryp" % "splain" % "0.5.3" cross CrossVersion.patch)
+addCompilerPlugin("io.tryp" % "splain" % "0.5.4" cross CrossVersion.patch)
 
 // allows using unsafeRun for experimenting in console
 consoleQuick / initialCommands := """
