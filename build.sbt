@@ -10,6 +10,8 @@ scalaVersion := "2.13.2"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
+fork := true
+
 addCommandAlias(
   "validate",
   Seq(
@@ -21,15 +23,13 @@ addCommandAlias(
   ).mkString(";", ";", "")
 )
 
-val awsVersion = "1.11.770"
-
-fork := true
-
-lazy val copyJars = taskKey[Unit]("copyJars")
+addCommandAlias("dynamodbLocal", "dynamite/test:runMain dynamite.DynamoDBLocal")
 
 javaOptions in Test ++= Seq(
   "-Dsqlite4java.library.path=native-libs"
 )
+
+lazy val copyJars = taskKey[Unit]("copyJars")
 
 copyJars := {
   // See http://softwarebyjosh.com/2018/03/25/how-to-unit-test-your-dynamodb-queries.html
@@ -59,6 +59,7 @@ classpathTypes ++= Set("dylib", "so")
 
 val zioVersion = "1.0.0-RC18-2"
 val zioConfigVersion = "1.0.0-RC16-2"
+val awsVersion = "1.11.770"
 
 libraryDependencies ++= Seq(
   "com.lihaoyi" %% "fastparse" % "2.3.0",

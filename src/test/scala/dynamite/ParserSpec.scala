@@ -14,7 +14,9 @@ object ParserSpec extends DefaultRunnableSpec {
     assert(parse(query))(isRight(anything))
 
   def validate(query: String, expected: Command) =
-    assert(parse(query))(isRight(equalTo(expected)))
+    assert(parse(query).left.map(_.getCause.getMessage))(
+      isRight(equalTo(expected))
+    )
 
   def spec = suite("parser")(
     test("parse wildcard fields")(
@@ -393,6 +395,16 @@ object ParserSpec extends DefaultRunnableSpec {
             "id" -> StringValue("id-1"),
             "curated" -> BoolValue(false)
           )
+        )
+      )
+    ),
+    test("support false")(
+      validate(
+        """create table users(userId string)""",
+        CreateTable(
+          tableName = "users",
+          name = "userId",
+          typeName = "string"
         )
       )
     )

@@ -11,13 +11,15 @@ import jline.console.history.FileHistory
 import zio.logging.Logging
 import dynamite.Ast._
 import dynamite.Parser.ParseException
-import dynamite.Response.{KeySchema, Paged, ResultPage}
+import dynamite.Response.{Complete, KeySchema, Paged, ResultPage}
 import fansi._
 import zio._
 import zio.console.{putStrLn, Console}
 import zio.config.Config
 import java.io.{Closeable, File, PrintWriter, StringWriter}
+
 import zio.stream.ZStream
+
 import scala.jdk.CollectionConverters._
 
 object Repl {
@@ -142,7 +144,7 @@ object Repl {
             ).map(out.print)
         }
       case PageType.TableNamePaging(tableNames) =>
-        Task {
+        Task(
           out.println(
             Table(
               headers = Seq("name"),
@@ -150,7 +152,7 @@ object Repl {
               None
             )
           )
-        }
+        ).when(tableNames.nonEmpty)
     }
   }
 
@@ -220,6 +222,8 @@ object Repl {
     case (_, Response.Info(message)) =>
       Task(out.println(message))
     case (_: Insert, _) =>
+      Task.unit
+    case (_, Complete) =>
       Task.unit
     case unhandled =>
       Task(out.println(Color.Yellow(s"[warn] unhandled response $unhandled")))

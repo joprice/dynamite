@@ -18,7 +18,6 @@ import zio.{Task, ZIO, ZManaged}
 import zio.logging.Logging
 import zio.stream.ZStream
 import zio.test.environment.TestClock
-
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
@@ -50,6 +49,26 @@ object ReplSpec extends DefaultRunnableSpec {
                 s"""${Repl.formatError("fail")}
           |""".stripMargin
               )
+            )
+          )
+      },
+      testM("create table") {
+        val query = "create table users (userId string);"
+        val writer = new StringWriter()
+        val tables = new TableCache(Eval.describeTable)
+        withReader(query)
+          .use { reader =>
+            Repl.loop(
+              "",
+              new PrintWriter(writer),
+              reader,
+              Ast.Format.Tabular,
+              Eval(_, tables, pageSize = 10)
+            )
+          }
+          .as(
+            assert(writer.toString)(
+              equalTo("")
             )
           )
       },

@@ -49,6 +49,12 @@ object Ast {
       values: Seq[(String, Value)]
   ) extends Query
 
+  final case class CreateTable(
+      tableName: String,
+      name: String,
+      typeName: String
+  ) extends Query
+
   case object ShowTables extends Query
 
   final case class DescribeTable(table: String) extends Query

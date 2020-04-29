@@ -1,9 +1,10 @@
 package dynamite
 
 import dynamite.Response.TableDescription
+
 import scala.collection.concurrent.TrieMap
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException
-import zio.{RIO, Task}
+import zio.{RIO, ZIO}
 
 class TableCache[R](describeTable: String => RIO[R, TableDescription]) {
   private[this] val tableNameCache = TrieMap[String, TableDescription]()
@@ -13,7 +14,7 @@ class TableCache[R](describeTable: String => RIO[R, TableDescription]) {
   def get(tableName: String): RIO[R, Option[TableDescription]] =
     tableNameCache
       .get(tableName)
-      .map(value => Task.succeed(Some(value)))
+      .map(value => ZIO.some(value))
       .getOrElse {
         describeTable(tableName)
           .map { result =>
@@ -21,7 +22,7 @@ class TableCache[R](describeTable: String => RIO[R, TableDescription]) {
             Option(result)
           }
           .catchSome {
-            case _: ResourceNotFoundException => Task.succeed(None)
+            case _: ResourceNotFoundException => ZIO.none
           }
       }
 }

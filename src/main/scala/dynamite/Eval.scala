@@ -28,10 +28,11 @@ object Eval {
     query match {
       case query: Select =>
         select(query, pageSize, tableCache)
-      case query: Update => update(query)
-      case query: Delete => delete(query)
-      case query: Insert => insert(query)
-      case ShowTables    => Task.succeed(showTables)
+      case query: Update      => update(query)
+      case query: Delete      => delete(query)
+      case query: Insert      => insert(query)
+      case query: CreateTable => createTable(query)
+      case ShowTables         => Task.succeed(showTables)
       case DescribeTable(table) =>
         tableCache
           .get(table)
@@ -314,12 +315,27 @@ object Eval {
     }
 
   def showTables: TableNames = TableNames(
-    ZStream.fromEffect(
-      Timed(
-        Dynamo.listTables
-      )
-    )
+    Dynamo.listTables.mapM(value => Timed(Task.succeed(value)))
   )
+
+  def toScalarAttribute(typeName: String) =
+    typeName match {
+      case "string" => ZIO.succeed(ScalarAttributeType.S)
+      case other =>
+        ZIO.fail(new IllegalArgumentException(s"Invalid scalar type $other"))
+    }
+
+  def createTable(table: CreateTable) =
+    for {
+      typeName <- toScalarAttribute(table.typeName)
+      result <- Dynamo
+        .createTable(
+          tableName = table.tableName,
+          hash = (table.name, typeName),
+          range = None
+        )
+        .as(Complete)
+    } yield result
 
   def insert(
       query: Insert

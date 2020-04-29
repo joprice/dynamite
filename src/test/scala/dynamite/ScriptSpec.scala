@@ -3,7 +3,6 @@ package dynamite
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import dynamite.Dynamo.DynamoClient
-import zio.ZIO
 import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.model.{
@@ -15,10 +14,10 @@ import com.amazonaws.services.dynamodbv2.model.{
   ScalarAttributeType
 }
 import zio.test.environment.TestConsole
-import zio.{Task, ZLayer, ZManaged}
+import zio.{Task, ZIO, ZLayer, ZManaged}
 import zio.test._
 import zio.test.Assertion._
-import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
+
 import scala.jdk.CollectionConverters._
 
 object ScriptSpec extends DefaultRunnableSpec {
@@ -81,16 +80,10 @@ object ScriptSpec extends DefaultRunnableSpec {
     ZLayer.fromManaged(
       ZManaged
         .fromEffect(randomPort)
-        .flatMap(port => dynamoServer(port) *> dynamoLocalClient(port))
+        .flatMap(port =>
+          DynamoTestHelpers.dynamoServer(port) *> dynamoLocalClient(port)
+        )
     )
-
-  def dynamoServer(port: Int) =
-    ZManaged.makeEffect {
-      val localArgs = Array("-inMemory", s"-port", s"$port")
-      val server = ServerRunner.createServerFromCommandLineArgs(localArgs)
-      server.start()
-      server
-    }(_.stop)
 
   def dynamoLocalClient(port: Int) =
     ZManaged.makeEffect(
@@ -102,6 +95,11 @@ object ScriptSpec extends DefaultRunnableSpec {
           )
         )
     )(_.shutdown())
+
+  def cleanupTable(tableName: String) =
+    ZIO.accessM[DynamoClient] { value =>
+      Task(value.get.deleteTable(tableName)).orDie
+    }
 
   def captureStdOut[A](f: => A): (String, A) = {
     val os = new ByteArrayOutputStream()
@@ -206,8 +204,6 @@ object ScriptSpec extends DefaultRunnableSpec {
       testM("render an error when parsing fails") {
         val input = "select * from playlists limid"
         for {
-          client <- ZIO
-            .access[DynamoClient](_.get)
           message <- Script
             .eval(Opts(format = Format.JsonPretty), input)
             .flip
@@ -221,6 +217,31 @@ object ScriptSpec extends DefaultRunnableSpec {
             )
           )
         }
+      },
+      testM("create table") {
+        val input = "create table users (userId string);"
+        (for {
+          () <- Script.eval(Opts(), input)
+          output <- TestConsole.output
+        } yield {
+          assert(output)(equalTo(Vector()))
+        }).onExit(_ => cleanupTable("users"))
+      },
+      testM("support multiple statements") {
+        val input =
+          """
+            |create table users (userId string);
+            |create table events (userId string);
+            |create table notifications (userId string);
+            |""".stripMargin
+        (for {
+          () <- Script.eval(Opts(), input)
+          output <- TestConsole.output
+        } yield {
+          assert(output)(equalTo(Vector()))
+        }).onExit(_ => cleanupTable("users"))
+          .onExit(_ => cleanupTable("events"))
+          .onExit(_ => cleanupTable("notifications"))
       },
       testM("render table names") {
         withPlaylistTable

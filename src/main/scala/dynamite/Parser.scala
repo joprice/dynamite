@@ -182,10 +182,16 @@ object Parser {
     P(keyword("show") ~ spaces ~ keyword("format"))
       .map(_ => ShowFormat)
 
+  def createTable[_: P] =
+    P(
+      keyword("create") ~/ spaces ~ keyword("table") ~
+        spaces ~ ident ~ space.rep ~ "(" ~ ident ~ spaces ~ ident ~ space.rep ~ ")"
+    ).map(CreateTable.tupled)
+
   def query[_: P]: P[Command] =
     P(
       spaces.? ~ (
-        update | select | delete | insert | showTables | describeTable | setFormat | showFormat
+        update | select | delete | insert | createTable | showTables | describeTable | setFormat | showFormat
       ) ~ spaces.? ~ End
     )
 
