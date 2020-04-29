@@ -172,3 +172,6 @@ import zio._, zio.console._, zio.Runtime.default._
 console / initialCommands := (consoleQuick / initialCommands).value + """
 import dynamite._
 """
+
+reporterConfig := reporterConfig.value.withShowLegend(false)
+reporterConfig := reporterConfig.value.withReverseOrder(true)

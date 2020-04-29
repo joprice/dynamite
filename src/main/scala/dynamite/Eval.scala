@@ -189,17 +189,20 @@ object Eval {
             //TODO: restore duration sum
             ZStream.fromEffect(
               resultSet.results
-                .map(_.result.size)
+                .map(_.result.data.size)
                 .fold(0)(_ + _)
                 .map { count =>
                   import scala.concurrent.duration._
                   Timed(
-                    List(
-                      Map(
-                        agg.name -> toAttributeValue(
-                          Ast.IntValue(count.toString)
+                    Page(
+                      List(
+                        Map(
+                          agg.name -> toAttributeValue(
+                            Ast.IntValue(count.toString)
+                          )
                         )
-                      )
+                      ),
+                      hasMore = false
                     ),
                     0.second
                   )
@@ -412,7 +415,12 @@ object Eval {
         ZStream.fromIterableM(
           data.map { data =>
             List(
-              data.map(_.asScala.map(_.asScala.toMap).toList)
+              data.map { data =>
+                Page(
+                  data.asScala.map(_.asScala.toMap).toList,
+                  hasMore = false
+                )
+              }
             )
           }
         ),
@@ -607,14 +615,22 @@ object Eval {
     def scan() = {
       //TODO: scan doesn't support order (because doesn't on hash key?)
       val (aggregates, fields) = resolveProjection(query.projection)
-      val results = Timed(
-        Dynamo.scan(query.from, fields, limit = query.limit)
-      )
+      val results =
+        ZStream(
+          Dynamo
+            .scan(query.from, fields, limit = query.limit)
+            .map(Page.tupled)
+            .process
+            //TODO: replace with built-in .timed
+            .map(Timed.apply(_))
+        )
       (
         aggregates,
-        wrap(
-          results.map(_.map(_.getItems)),
-          results.map(value => Option(() => value.result.getConsumedCapacity))
+        ResultSet(
+          results,
+          ZIO.succeed(None)
+          //TODO:
+          //Some(() => results.get  AccumulatedConsumedCapacity)
         )
       )
     }

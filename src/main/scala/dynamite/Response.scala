@@ -12,15 +12,16 @@ sealed abstract class Response
 
 object Response {
 
+  case class Page(data: List[DynamoObject], hasMore: Boolean)
+
   type Paged[R, A] = ZStream[R, Throwable, Timed[A]]
   type ResultPage = Paged[Eval.Env, PageType]
 
   final case class Info(message: String) extends Response
 
   final case class ResultSet(
-      results: Paged[Eval.Env, List[DynamoObject]],
-      capacity: RIO[Eval.Env, Option[() => ConsumedCapacity]] =
-        Task.succeed(None)
+      results: Paged[Eval.Env, Page],
+      capacity: RIO[Eval.Env, Option[() => ConsumedCapacity]] = Task.none
   ) extends Response
 
   final case class TableNames(
