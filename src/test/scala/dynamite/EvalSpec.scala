@@ -16,7 +16,7 @@ import dynamite.Eval.{
   UnknownTableException
 }
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
-import dynamite.ScriptSpec.cleanupTable
+import DynamoDBTestHelpers._
 import play.api.libs.json.{JsValue, Json}
 import zio.random.Random
 import zio.stream.ZStream
@@ -27,9 +27,6 @@ import zio.test.Assertion._
 object EvalSpec extends DefaultRunnableSpec {
   val tableName = "eval-spec"
   val rangeKeyTableName = "eval-spec-range-key"
-
-  val dynamoClient =
-    ScriptSpec.dynamoClient
 
   case object CreateTables
   type ClientInit = Has[CreateTables.type]

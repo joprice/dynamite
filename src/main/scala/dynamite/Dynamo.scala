@@ -21,7 +21,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 
 import scala.jdk.CollectionConverters._
-import zio.{Has, IO, ZIO, ZLayer, ZManaged}
+import zio.{Has, IO, ZIO, ZLayer}
 import com.amazonaws.services.dynamodbv2.model.{
   Delete => _,
   Select => _,
@@ -71,16 +71,13 @@ object Dynamo {
       .build()
   }
 
-  val withClient =
-    ZManaged.make {
+  val clientLayer =
+    ZLayer.fromAcquireRelease(
       for {
         opts <- ZIO.access[Has[Opts]](_.get)
         config <- ZIO.access[Config[DynamiteConfig]](_.get)
       } yield dynamoClient(config, opts)
-    }(client => ZIO.effectTotal(client.shutdown()))
-
-  val layer =
-    ZLayer.fromManaged(withClient)
+    )(client => ZIO.effectTotal(client.shutdown()))
 
   trait Service {
 

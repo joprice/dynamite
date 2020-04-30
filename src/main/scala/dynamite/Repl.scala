@@ -128,10 +128,7 @@ object Repl {
       case Timed(result, duration) =>
         //TODO: don't show q unless another page is available
         for {
-          () <- Task {
-            reader.clearPrompt()
-            reader.disableEcho()
-          }
+          () <- Task(reader.initPagination())
           _ <- printPage(out, reader, format, result)
           () <- ZIO {
             out.println(s"Completed in ${duration.toMillis} ms")
