@@ -149,10 +149,12 @@ object Parser {
     P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
       .map(Delete.tupled)
 
+  def table[_: P] = P(ident)
+
   def insert[_: P] =
     P(
       keyword("insert") ~/ spaces ~
-        keyword("into") ~ spaces ~ ident ~ spaces ~
+        keyword("into") ~ spaces ~ table ~ space.rep ~
         // it would be nice to have column names be optional, but there is no
         // stable order of a dynamo schema. Some convention could be introduced, but it
         // might surprising. Optional feature?
@@ -185,8 +187,19 @@ object Parser {
   def createTable[_: P] =
     P(
       keyword("create") ~/ spaces ~ keyword("table") ~
-        spaces ~ ident ~ space.rep ~ "(" ~ ident ~ spaces ~ ident ~ space.rep ~ ")"
-    ).map(CreateTable.tupled)
+        (spaces ~ keyword("if") ~/ spaces ~ keyword("not") ~ spaces ~ keyword(
+          "exists"
+        )).!.?.map(_.isDefined) ~
+        spaces ~ table ~ space.rep ~ "(" ~ ident ~ spaces ~ ident ~ space.rep ~ ")"
+    ).map {
+      case (ignoreExisting, table, hash, hashType) =>
+        CreateTable(
+          tableName = table,
+          name = hash,
+          typeName = hashType,
+          ignoreExisting = ignoreExisting
+        )
+    }
 
   def query[_: P]: P[Command] =
     P(

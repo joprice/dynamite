@@ -87,8 +87,9 @@ object Dynamo {
     def createTable(
         tableName: String,
         hash: (String, ScalarAttributeType),
-        range: Option[(String, ScalarAttributeType)]
-    ): Result[CreateTableResult]
+        range: Option[(String, ScalarAttributeType)],
+        ignoreExisting: Boolean
+    ): Result[Unit]
 
     def describeTable(
         tableName: String
@@ -395,7 +396,8 @@ object Dynamo {
       def createTable(
           tableName: String,
           hash: (String, ScalarAttributeType),
-          range: Option[(String, ScalarAttributeType)]
+          range: Option[(String, ScalarAttributeType)],
+          ignoreExisting: Boolean
       ) = {
         val (schemas, attributes) = (
           (hash, KeyType.HASH) :: range.map(_ -> KeyType.RANGE).toList
@@ -424,11 +426,12 @@ object Dynamo {
                 .withReadCapacityUnits(1L)
                 .withWriteCapacityUnits(1L)
             )
-        ).mapError {
-          case _: ResourceInUseException =>
-            new Exception(s"Table $tableName already exists")
-          case error => error
-        }
+        ).unit
+          .catchSome {
+            case _: ResourceInUseException =>
+              if (ignoreExisting) ZIO.unit
+              else ZIO.fail(new Exception(s"Table $tableName already exists"))
+          }
       }
 
       def updateItem(
@@ -556,9 +559,10 @@ object Dynamo {
   def createTable(
       tableName: String,
       hash: (String, ScalarAttributeType),
-      range: Option[(String, ScalarAttributeType)]
-  ): ServiceResult[CreateTableResult] =
+      range: Option[(String, ScalarAttributeType)],
+      ignoreExisting: Boolean
+  ): ServiceResult[Unit] =
     ZIO.accessM[Dynamo](
-      _.get.createTable(tableName, hash, range)
+      _.get.createTable(tableName, hash, range, ignoreExisting)
     )
 }

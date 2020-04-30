@@ -335,7 +335,8 @@ object Eval {
         .createTable(
           tableName = table.tableName,
           hash = (table.name, typeName),
-          range = None
+          range = None,
+          ignoreExisting = table.ignoreExisting
         )
         .as(Complete)
     } yield result
