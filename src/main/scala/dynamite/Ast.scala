@@ -91,7 +91,7 @@ object Ast {
 
   final case class StringValue(value: String) extends KeyValue
 
-  final case class BoolValue(value: Boolean) extends KeyValue
+  final case class BoolValue(value: Boolean) extends Value
 
   /**
     * NOTE: The constructors of IntValue and FloatValue keep their original string

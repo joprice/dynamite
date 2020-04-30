@@ -398,6 +398,53 @@ object Eval {
       }
     )
 
+  def validateKeyType(
+      tableDescription: TableDescription,
+      index: Option[Index],
+      query: Select
+  ): Task[Unit] = {
+    def validate(schema: KeySchema, key: KeySchema) = {
+      def renderScalar(`type`: ScalarAttributeType) =
+        `type` match {
+          case ScalarAttributeType.S => "string"
+          case ScalarAttributeType.N => "number"
+          case ScalarAttributeType.B => "binary"
+        }
+      if (schema.`type` != key.`type`) {
+        val expected = renderScalar(schema.`type`)
+        val actual = renderScalar(key.`type`)
+        Task
+          .fail(
+            new Exception(
+              s"Wrong type for key ${key.name}. Expected $expected, found $actual"
+            )
+          )
+      } else Task.unit
+    }
+    def keyToKeySchema(key: Key) =
+      KeySchema(key.field, key.value match {
+        case _: StringValue => ScalarAttributeType.S
+        case _: NumberValue => ScalarAttributeType.N
+      })
+
+    query.where
+      .map { where =>
+        (keyToKeySchema(where.hash), where.range.map(keyToKeySchema))
+      }
+      .map {
+        case (hash, range) =>
+          val (tableHash, tableRange) = index
+            .map(index => (index.hash, index.range))
+            .getOrElse((tableDescription.hash, tableDescription.range))
+
+          validate(tableHash, hash) *>
+            tableRange
+              .zip(range)
+              .fold[Task[Unit]](Task.unit)((validate _).tupled)
+      }
+      .getOrElse(Task.unit)
+  }
+
   def select(
       query: Select,
       pageSize: Int,
@@ -444,9 +491,9 @@ object Eval {
         } else {
           schema.range match {
             case Some(range) =>
-              if (rangeKey != range.name) {
-                Task.fail(new Exception(s"Invalid range key '$rangeKey'"))
-              } else Task.unit
+              Task
+                .fail(new Exception(s"Invalid range key '$rangeKey'"))
+                .when(rangeKey != range.name)
             case None =>
               Task.fail(
                 new Exception(
@@ -458,7 +505,9 @@ object Eval {
 
       // Because indexes can have duplicates, GetItemSpec cannot be used. Query must be used instead.
       def queryIndex(index: Index) =
-        validateKeys(index).map { _ =>
+        for {
+          () <- validateKeys(index)
+        } yield {
           val (aggregates, fields) = resolveProjection(query.projection)
           val results = Timed(
             Dynamo.query(
@@ -485,7 +534,7 @@ object Eval {
         val Key(hashKey, hashValue) = hash
         val Key(rangeKey, rangeValue) = range
         val (aggregates, fields) = resolveProjection(query.projection)
-        validateKeys(tableDescription).map { _ =>
+        validateKeys(tableDescription).as {
           val results = Timed(
             Dynamo.getItem(
               tableName = query.from,
@@ -525,6 +574,7 @@ object Eval {
 
       for {
         index <- getIndex
+        () <- validateKeyType(tableDescription, index, query)
         result <- index
           .map { index =>
             //TODO: check types as well?
@@ -566,20 +616,22 @@ object Eval {
             )
           }
         }
-        .map { maybeIndex =>
-          Timed(
+        .flatMap { maybeIndex =>
+          validateKeyType(tableDescription, maybeIndex, query) *>
             maybeIndex
               .map { index =>
-                validateOrderBy(index.hash, index.range, query.orderBy) *>
-                  Dynamo.query(
-                    tableName = query.from,
-                    hash = (field, toAttributeValue(value)),
-                    range = None,
-                    index = Some(index.name),
-                    fields = fields,
-                    limit = query.limit,
-                    scanForward =
-                      scanForward(query.orderBy.flatMap(_.direction))
+                validateOrderBy(index.hash, index.range, query.orderBy) as
+                  Timed(
+                    Dynamo.query(
+                      tableName = query.from,
+                      hash = (field, toAttributeValue(value)),
+                      range = None,
+                      index = Some(index.name),
+                      fields = fields,
+                      limit = query.limit,
+                      scanForward =
+                        scanForward(query.orderBy.flatMap(_.direction))
+                    )
                   )
               }
               .getOrElse {
@@ -587,20 +639,21 @@ object Eval {
                   tableDescription.hash,
                   tableDescription.range,
                   query.orderBy
-                ) *>
-                  //TODO: combine with above (just return index
-                  Dynamo.query(
-                    tableName = query.from,
-                    hash = (field, toAttributeValue(value)),
-                    range = None,
-                    index = None,
-                    fields = fields,
-                    limit = query.limit,
-                    scanForward =
-                      scanForward(query.orderBy.flatMap(_.direction))
+                ) as
+                  //TODO: combine with above (just return index)
+                  Timed(
+                    Dynamo.query(
+                      tableName = query.from,
+                      hash = (field, toAttributeValue(value)),
+                      range = None,
+                      index = None,
+                      fields = fields,
+                      limit = query.limit,
+                      scanForward =
+                        scanForward(query.orderBy.flatMap(_.direction))
+                    )
                   )
               }
-          )
         }
       results.map { results =>
         (
@@ -629,7 +682,7 @@ object Eval {
         aggregates,
         ResultSet(
           results,
-          ZIO.succeed(None)
+          ZIO.none
           //TODO:
           //Some(() => results.get  AccumulatedConsumedCapacity)
         )
@@ -648,9 +701,7 @@ object Eval {
           table =>
             table.fold[Task[TableDescription]](
               Task.fail(UnknownTableException(query.from))
-            ) {
-              Task.succeed(_)
-            }
+            )(Task.succeed(_))
         )
       //TODO: abstract over GetItemSpec, QuerySpec and ScanSpec?
       result <- query.where match {
