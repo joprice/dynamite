@@ -46,7 +46,7 @@ copyJars := {
   files.foreach { f =>
     // NOTE: this version must be trimmed, otherwise it will not be found
     // by sqlite
-    val fileToCopy = new File(nativeLibs, f.name.replace(dynamodbLocalVersion, ""))
+    val fileToCopy = new File(nativeLibs, f.name.replace(s"-$dynamodbLocalVersion", ""))
     if (!fileToCopy.exists()) {
       println(s"Copying $f to $fileToCopy")
       Files.copy(f.toPath, fileToCopy.toPath)

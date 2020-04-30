@@ -9,7 +9,7 @@ final case class Opts(
     script: Option[String] = None,
     configFile: Option[File] = None,
     profile: Option[String] = None,
-    local : Boolean = false
+    local: Boolean = false
 )
 
 object Opts {
@@ -23,7 +23,9 @@ object Opts {
 
     opt[Unit]("local")
       .action { case (_, config) => config.copy(local = true) }
-      .text("Whether to start and connect to a local dynamodb instance for testing")
+      .text(
+        "Whether to start and connect to a local dynamodb instance for testing"
+      )
 
     opt[File]("config-file")
       .action { (configFile, config) =>
