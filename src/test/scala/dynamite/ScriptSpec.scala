@@ -3,7 +3,6 @@ package dynamite
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import dynamite.Dynamo.DynamoClient
-import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB
 import com.amazonaws.services.dynamodbv2.model.{
   AttributeDefinition,
@@ -14,11 +13,11 @@ import com.amazonaws.services.dynamodbv2.model.{
   ScalarAttributeType
 }
 import zio.test.environment.TestConsole
-import zio.{Task, ZIO, ZLayer, ZManaged}
+import zio.{Task, ZManaged}
 import zio.test._
 import zio.test.Assertion._
-
 import scala.jdk.CollectionConverters._
+import DynamoDBTestHelpers._
 
 object ScriptSpec extends DefaultRunnableSpec {
   private def attributeDefinitions(
@@ -57,48 +56,6 @@ object ScriptSpec extends DefaultRunnableSpec {
             case (symbol, keyType) => new KeySchemaElement(symbol, keyType)
           }.asJava
         )
-    }
-
-  def withTable[T](tableName: String)(
-      attributeDefinitions: (String, ScalarAttributeType)*
-  )(
-      client: AmazonDynamoDB
-  ) =
-    ZManaged.make {
-      createTable(client)(tableName)(attributeDefinitions: _*)
-    }(_ => Task(client.deleteTable(tableName)).orDie)
-
-  val randomPort = {
-    // arbitrary value to avoid common low number ports
-    val minPort = 10000
-    zio.random
-      .nextInt(65535 - minPort)
-      .map(_ + minPort)
-  }
-
-  val dynamoClient =
-    ZLayer.fromManaged(
-      ZManaged
-        .fromEffect(randomPort)
-        .flatMap(port =>
-          DynamoTestHelpers.dynamoServer(port) *> dynamoLocalClient(port)
-        )
-    )
-
-  def dynamoLocalClient(port: Int) =
-    ZManaged.makeEffect(
-      Dynamo
-        .dynamoClient(
-          endpoint = Some(s"http://localhost:$port"),
-          credentials = Some(
-            new AWSStaticCredentialsProvider(new BasicAWSCredentials("", ""))
-          )
-        )
-    )(_.shutdown())
-
-  def cleanupTable(tableName: String) =
-    ZIO.accessM[DynamoClient] { value =>
-      Task(value.get.deleteTable(tableName)).orDie
     }
 
   def captureStdOut[A](f: => A): (String, A) = {
@@ -141,7 +98,7 @@ object ScriptSpec extends DefaultRunnableSpec {
           .use { client =>
             for {
               _ <- insertRows
-              () <- Script.eval(Opts(), input)
+              () <- Script.eval(Format.Tabular, input)
               output <- TestConsole.output
             } yield {
               assert(output)(
@@ -161,7 +118,7 @@ object ScriptSpec extends DefaultRunnableSpec {
         withPlaylistTable.use { client =>
           for {
             _ <- insertRows
-            () <- Script.eval(Opts(format = Format.Json), input)
+            () <- Script.eval(Format.Json, input)
             output <- TestConsole.output
           } yield {
             assert(output)(
@@ -182,7 +139,7 @@ object ScriptSpec extends DefaultRunnableSpec {
             val input = "select * from playlists limit 2"
             for {
               _ <- insertRows
-              () <- Script.eval(Opts(format = Format.JsonPretty), input)
+              () <- Script.eval(Format.JsonPretty, input)
               output <- TestConsole.output
             } yield {
               assert(output)(
@@ -205,7 +162,7 @@ object ScriptSpec extends DefaultRunnableSpec {
         val input = "select * from playlists limid"
         for {
           message <- Script
-            .eval(Opts(format = Format.JsonPretty), input)
+            .eval(Format.JsonPretty, input)
             .flip
             .map(_.getMessage)
         } yield {
@@ -221,7 +178,7 @@ object ScriptSpec extends DefaultRunnableSpec {
       testM("create table") {
         val input = "create table users (userId string);"
         (for {
-          () <- Script.eval(Opts(), input)
+          () <- Script.eval(Format.Tabular, input)
           output <- TestConsole.output
         } yield {
           assert(output)(equalTo(Vector()))
@@ -235,7 +192,7 @@ object ScriptSpec extends DefaultRunnableSpec {
             |create table notifications (userId string);
             |""".stripMargin
         (for {
-          () <- Script.eval(Opts(), input)
+          () <- Script.eval(Format.Tabular, input)
           output <- TestConsole.output
         } yield {
           assert(output)(equalTo(Vector()))
@@ -253,7 +210,7 @@ object ScriptSpec extends DefaultRunnableSpec {
           .use { client =>
             val input = "show tables"
             for {
-              () <- Script.eval(Opts(), input)
+              () <- Script.eval(Format.Tabular, input)
               output <- TestConsole.output
             } yield {
               assert(output)(

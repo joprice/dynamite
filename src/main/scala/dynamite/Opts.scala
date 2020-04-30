@@ -8,7 +8,8 @@ final case class Opts(
     format: Format = Format.Tabular,
     script: Option[String] = None,
     configFile: Option[File] = None,
-    profile: Option[String] = None
+    profile: Option[String] = None,
+    local : Boolean = false
 )
 
 object Opts {
@@ -19,6 +20,10 @@ object Opts {
   val parser = new scopt.OptionParser[Opts](appName) {
     head(appName, s"v${BuildInfo.version}")
     version("version")
+
+    opt[Unit]("local")
+      .action { case (_, config) => config.copy(local = true) }
+      .text("Whether to start and connect to a local dynamodb instance for testing")
 
     opt[File]("config-file")
       .action { (configFile, config) =>

@@ -25,11 +25,15 @@ addCommandAlias(
 
 addCommandAlias("dynamodbLocal", "dynamite/test:runMain dynamite.DynamoDBLocal")
 
-javaOptions in Test ++= Seq(
+val dynamodbLocalProperties = Seq(
   "-Dsqlite4java.library.path=native-libs"
 )
 
+javaOptions in Test ++= dynamodbLocalProperties
+
 lazy val copyJars = taskKey[Unit]("copyJars")
+
+val dynamodbLocalVersion = "1.0.392"
 
 copyJars := {
   // See http://softwarebyjosh.com/2018/03/25/how-to-unit-test-your-dynamodb-queries.html
@@ -40,12 +44,20 @@ copyJars := {
   val nativeLibs = new File(baseDirectory.value, "native-libs")
   Files.createDirectories(nativeLibs.toPath)
   files.foreach { f =>
-    val fileToCopy = new File(nativeLibs, f.name)
+    // NOTE: this version must be trimmed, otherwise it will not be found
+    // by sqlite
+    val fileToCopy = new File(nativeLibs, f.name.replace(dynamodbLocalVersion, ""))
     if (!fileToCopy.exists()) {
       println(s"Copying $f to $fileToCopy")
       Files.copy(f.toPath, fileToCopy.toPath)
     }
   }
+}
+
+bashScriptExtraDefines += """addJava "-Dsqlite4java.library.path=$(realpath ${app_home}/../native-libs)""""
+
+mappings in Universal ++= NativePackagerHelper.directory("native-libs").map { t =>
+  (t._1, t._2)
 }
 
 (compile in Compile) := (compile in Compile).dependsOn(copyJars).value
@@ -78,14 +90,14 @@ libraryDependencies ++= Seq(
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
   "com.typesafe.play" %% "play-json" % "2.8.1",
-  "com.amazonaws" % "DynamoDBLocal" % "1.12.0" % Test,
-  "com.almworks.sqlite4java" % "sqlite4java" % "1.0.392" % Test,
-  "com.almworks.sqlite4java" % "libsqlite4java-osx" % "1.0.392" % Test artifacts (Artifact(
+  "com.amazonaws" % "DynamoDBLocal" % "1.11.477",
+  "com.almworks.sqlite4java" % "sqlite4java" % dynamodbLocalVersion,
+  "com.almworks.sqlite4java" % "libsqlite4java-osx" % dynamodbLocalVersion artifacts (Artifact(
     "libsqlite4java-osx",
     "dylib",
     "dylib"
   )),
-  "com.almworks.sqlite4java" % "libsqlite4java-linux-amd64" % "1.0.392" % Test artifacts (Artifact(
+  "com.almworks.sqlite4java" % "libsqlite4java-linux-amd64" % dynamodbLocalVersion artifacts (Artifact(
     "libsqlite4java-linux-amd64",
     "so",
     "so"

@@ -12,6 +12,11 @@ trait Reader {
     resetPrompt()
   }
 
+  def initPagination() = {
+    disableEcho()
+    clearPrompt()
+  }
+
   def terminalWidth: Int
 
   def disableEcho(): Unit

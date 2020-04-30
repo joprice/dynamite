@@ -94,15 +94,15 @@ object Script {
   ], Throwable, Unit] =
     for {
       opts <- ZIO.access[Has[Opts]](_.get)
-      result <- eval(opts, input)
+      result <- eval(opts.format, input)
     } yield result
 
-  def eval(opts: Opts, input: String) =
+  def eval(format: Format, input: String) =
     ZIO.foreach_(input.split(';').map(_.trim).filter(_.nonEmpty))(
-      evalLine(opts, _)
+      evalLine(format, _)
     )
 
-  def evalQuery(query: Query, opts: Opts) = {
+  def evalQuery(query: Query, format: Format) = {
     //TODO: mutable state
     val tables = new TableCache(Eval.describeTable)
     Eval(query, tables, pageSize = 20).flatMap { results =>
@@ -110,7 +110,7 @@ object Script {
         case (select: Ast.Select, Response.ResultSet(pages, _)) =>
           render(pages) { (values, first) =>
             renderPage(
-              opts.format,
+              format,
               values.data,
               select.projection,
               first
@@ -133,7 +133,7 @@ object Script {
   }
 
   def evalLine(
-      opts: Opts,
+      format: Format,
       input: String
   ): ZIO[Console with Eval.Env, Throwable, Unit] =
     Parser
@@ -143,7 +143,7 @@ object Script {
           Task.fail(
             new Exception(Ansi.stripAnsi(Repl.parseError(input, failure)))
           ), {
-          case query: Query => evalQuery(query, opts)
+          case query: Query => evalQuery(query, format)
           case _: ReplCommand =>
             Task.fail(
               new Exception("repl commands are not supported in script mode")

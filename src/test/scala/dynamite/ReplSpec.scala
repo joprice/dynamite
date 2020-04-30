@@ -3,7 +3,6 @@ package dynamite
 import zio.test._
 import zio.test.Assertion._
 import java.io._
-
 import com.amazonaws.services.dynamodbv2.model.{
   AttributeValue,
   ScalarAttributeType
@@ -11,14 +10,13 @@ import com.amazonaws.services.dynamodbv2.model.{
 import dynamite.Ast.{DescribeTable, ShowTables}
 import dynamite.Ast.Projection.FieldSelector.{All, Field}
 import dynamite.Response.{Index, KeySchema, Page}
-import dynamite.ScriptSpec.dynamoClient
+import DynamoDBTestHelpers._
 import fansi.{Bold, Str}
 import jline.internal.Ansi
 import zio.{Task, ZIO, ZManaged}
 import zio.logging.Logging
 import zio.stream.ZStream
 import zio.test.environment.TestClock
-
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
