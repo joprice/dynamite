@@ -80,3 +80,4 @@ dynamite --format=json-pretty < query.dql
 * load dynamo client in background on startup
 * order keys before other fields when `select *`
 * check value type matches when building query key conditions
+  - handled in select statements only
