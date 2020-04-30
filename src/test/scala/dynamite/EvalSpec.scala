@@ -72,7 +72,7 @@ object EvalSpec extends DefaultRunnableSpec {
         case Response.ResultSet(pages, _) =>
           pages
             .mapM { page =>
-              Task.foreach(page.result) { json =>
+              Task.foreach(page.result.data) { json =>
                 Script.dynamoObjectToJson(json)
               }
             }

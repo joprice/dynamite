@@ -10,16 +10,15 @@ import dynamite.Response.Complete
 import zio.console.{putStrLn, Console}
 import zio.stream._
 import play.api.libs.json.{Format => _, _}
-
 import scala.jdk.CollectionConverters._
 
 object Script {
 
   // paginate through the results, exiting at the first failure and printing as each page is processed
   def render[R1, E, A](
-      data: ZStream[R1, E, Timed[List[A]]]
+      data: ZStream[R1, E, Timed[A]]
   )(
-      f: (Seq[A], Boolean) => ZIO[Any, E, String]
+      f: (A, Boolean) => ZIO[Any, E, String]
   ): ZIO[R1 with Console, E, Unit] =
     // paginate through the results, exiting at the first failure and printing as each page is processed
     data
@@ -43,10 +42,12 @@ object Script {
         )
         .map(result => Ansi.stripAnsi(result).trim)
     case Format.Json =>
+      println(s"values $values")
       Task
         .foreach(values)(dynamoObjectToJson)
         .map(_.mkString("\n"))
     case Format.JsonPretty =>
+      println(s"values $values")
       Task
         .foreach(values)(dynamoObjectToJson)
         .map(_.map(result => Json.prettyPrint(result)).mkString("\n"))
@@ -101,6 +102,36 @@ object Script {
       evalLine(opts, _)
     )
 
+  def evalQuery(query: Query, opts: Opts) = {
+    //TODO: mutable state
+    val tables = new TableCache(Eval.describeTable)
+    Eval(query, tables, pageSize = 20).flatMap { results =>
+      (query, results) match {
+        case (select: Ast.Select, Response.ResultSet(pages, _)) =>
+          render(pages) { (values, first) =>
+            renderPage(
+              opts.format,
+              values.data,
+              select.projection,
+              first
+            )
+          }
+        case (ShowTables, Response.TableNames(names)) =>
+          //TODO: format tables output
+          render(names)((page, _) => Task.succeed(page.mkString("\n")))
+        //TODO: print update/delete success/failure
+        case (DescribeTable(_), Response.TableNames(_)) =>
+          Task.unit
+        case (_, Response.Info(message)) =>
+          putStrLn(message).unit
+        case (_: Insert, _) | (_, Complete) =>
+          Task.unit
+        case unhandled =>
+          Task.fail(new Exception(s"unhandled response $unhandled"))
+      }
+    }
+  }
+
   def evalLine(
       opts: Opts,
       input: String
@@ -112,36 +143,7 @@ object Script {
           Task.fail(
             new Exception(Ansi.stripAnsi(Repl.parseError(input, failure)))
           ), {
-          case query: Query =>
-            val tables = new TableCache(Eval.describeTable)
-            Eval(query, tables, pageSize = 20).flatMap {
-              results =>
-                (query, results) match {
-                  case (select: Ast.Select, Response.ResultSet(pages, _)) =>
-                    render(pages) { (values, first) =>
-                      renderPage(
-                        opts.format,
-                        values,
-                        select.projection,
-                        first
-                      )
-                    }
-                  case (ShowTables, Response.TableNames(names)) =>
-                    //TODO: format tables output
-                    render(names) { (page, _) =>
-                      Task.succeed(page.mkString("\n"))
-                    }
-                  //TODO: print update/delete success/failure
-                  case (DescribeTable(_), Response.TableNames(_)) =>
-                    Task.unit
-                  case (_, Response.Info(message)) =>
-                    putStrLn(message).unit
-                  case (_: Insert, _) | (_, Complete) =>
-                    Task.unit
-                  case unhandled =>
-                    Task.fail(new Exception(s"unhandled response $unhandled"))
-                }
-            }
+          case query: Query => evalQuery(query, opts)
           case _: ReplCommand =>
             Task.fail(
               new Exception("repl commands are not supported in script mode")

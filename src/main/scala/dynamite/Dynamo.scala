@@ -100,7 +100,7 @@ object Dynamo {
         tableName: String,
         fields: Seq[String],
         limit: Option[Int]
-    ): Result[ScanResult]
+    ): ZStream[Dynamo, Exception, (List[DynamoObject], Boolean)]
 
     def insert(
         tableName: String,
@@ -224,19 +224,52 @@ object Dynamo {
           fields: Seq[String],
           limit: Option[Int]
       ) = {
-        val spec = new ScanRequest()
-          .withTableName(tableName)
-        val withFields = if (fields.nonEmpty) {
-          val keys = fields.map(field => s"#$field")
-          spec
-            .withProjectionExpression(keys.mkString(","))
-            .withExpressionAttributeNames(
-              keys.zip(fields).toMap.asJava
-            )
-        } else spec
-        val withLimit = limit
-          .fold(withFields)(limit => withFields.withLimit(limit))
-        Dynamo.dynamoRequest(dynamo.scanAsync, withLimit)
+        type PageKey = java.util.Map[String, AttributeValue]
+
+        def loadPage(key: Option[PageKey]) = {
+          val spec = new ScanRequest()
+            .withTableName(tableName)
+          val withFields = if (fields.nonEmpty) {
+            val keys = fields.map(field => s"#$field")
+            spec
+              .withProjectionExpression(keys.mkString(","))
+              .withExpressionAttributeNames(
+                keys.zip(fields).toMap.asJava
+              )
+          } else spec
+          //TODO: always paginated in repl context (vs script, where higher throughput is preferred)?
+          val pageSize = 40
+          val actualLimit = limit.getOrElse(pageSize)
+          val withLimit = withFields
+            .withLimit(actualLimit)
+            .tapOpt(key)(identity)(_.withExclusiveStartKey(_))
+          Dynamo.dynamoRequest(dynamo.scanAsync, withLimit)
+        }
+
+        ZStream
+          .paginateM((0, Left(()): Either[Unit, PageKey])) {
+            case (count, value) =>
+              for {
+                result <- value match {
+                  case Left(())   => loadPage(None)
+                  case Right(key) => loadPage(Some(key))
+                }
+              } yield {
+                val rows = result.getItems.asScala.toList
+                  .map(_.asScala.toMap)
+                val newSize = count + rows.size
+                val key = Option(result.getLastEvaluatedKey)
+                val (data, newKey) = limit.fold((rows, key)) { limit =>
+                  if (newSize >= limit) {
+                    (rows.take(limit - count), None)
+                  } else (rows, key)
+                }
+                (
+                  (data, key.isDefined),
+                  newKey.map(value => (newSize, Right(value)))
+                )
+              }
+          }
       }
 
       def insert(
@@ -459,8 +492,8 @@ object Dynamo {
       tableName: String,
       fields: Seq[String],
       limit: Option[Int]
-  ): ServiceResult[ScanResult] =
-    ZIO.accessM[Dynamo](_.get.scan(tableName, fields, limit))
+  ): ZStream[Dynamo, Exception, (List[DynamoObject], Boolean)] =
+    ZStream.accessStream[Dynamo](_.get.scan(tableName, fields, limit))
 
   def insert(
       tableName: String,

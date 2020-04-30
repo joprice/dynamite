@@ -12,12 +12,17 @@ object Paging {
   case object EOF extends Paging[Nothing]
 }
 
-sealed abstract class PageType extends Product with Serializable
+sealed abstract class PageType extends Product with Serializable {
+  val hasMore: Boolean
+}
 
 object PageType {
   final case class TablePaging(
       select: Ast.Select,
-      data: List[DynamoObject]
+      data: List[DynamoObject],
+      hasMore: Boolean
   ) extends PageType
-  final case class TableNamePaging(names: Seq[String]) extends PageType
+
+  final case class TableNamePaging(names: Seq[String], hasMore: Boolean)
+      extends PageType
 }

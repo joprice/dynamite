@@ -225,7 +225,7 @@ object ScriptSpec extends DefaultRunnableSpec {
           output <- TestConsole.output
         } yield {
           assert(output)(equalTo(Vector()))
-        }).onExit(_ => cleanupTable("users"))
+        }).ensuring(cleanupTable("users"))
       },
       testM("support multiple statements") {
         val input =
@@ -239,9 +239,9 @@ object ScriptSpec extends DefaultRunnableSpec {
           output <- TestConsole.output
         } yield {
           assert(output)(equalTo(Vector()))
-        }).onExit(_ => cleanupTable("users"))
-          .onExit(_ => cleanupTable("events"))
-          .onExit(_ => cleanupTable("notifications"))
+        }).ensuring(cleanupTable("users"))
+          .ensuring(cleanupTable("events"))
+          .ensuring(cleanupTable("notifications"))
       },
       testM("render table names") {
         withPlaylistTable

@@ -81,3 +81,5 @@ dynamite --format=json-pretty < query.dql
 * order keys before other fields when `select *`
 * check value type matches when building query key conditions
 * `--local` flag that starts dynamodb-local in background and configures endpoint to use it
+* `if not exists`
+* fix spacing between table name and parens in insert

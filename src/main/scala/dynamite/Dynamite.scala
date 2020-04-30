@@ -42,7 +42,7 @@ object Dynamite extends App {
             val input = Console.in.lines().collect(Collectors.joining("\n"))
             Script(input)
           } else {
-            Repl(this.map(_ ++ Has(dynamo)))
+            Repl(this.map(_.add(dynamo)))
           }
         case Some(script @ _) => Script(script)
       }

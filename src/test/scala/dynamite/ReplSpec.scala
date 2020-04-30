@@ -10,7 +10,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 import dynamite.Ast.{DescribeTable, ShowTables}
 import dynamite.Ast.Projection.FieldSelector.{All, Field}
-import dynamite.Response.{Index, KeySchema}
+import dynamite.Response.{Index, KeySchema, Page}
 import dynamite.ScriptSpec.dynamoClient
 import fansi.{Bold, Str}
 import jline.internal.Ansi
@@ -18,6 +18,7 @@ import zio.{Task, ZIO, ZManaged}
 import zio.logging.Logging
 import zio.stream.ZStream
 import zio.test.environment.TestClock
+
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
@@ -115,20 +116,20 @@ object ReplSpec extends DefaultRunnableSpec {
                     Response.ResultSet(
                       ZStream(
                         Timed(
-                          List {
+                          Page(List {
                             Map(
                               "id" -> new AttributeValue().withS("abc"),
                               "size" -> new AttributeValue().withN("2")
                             )
-                          },
+                          }, hasMore = true),
                           1.second
                         ),
-                        Timed(List {
+                        Timed(Page(List {
                           Map(
                             "id" -> new AttributeValue().withS("def"),
                             "size" -> new AttributeValue().withN("2")
                           )
-                        }, 1.second)
+                        }, hasMore = false), 1.second)
                       )
                     )
                   )
@@ -192,12 +193,12 @@ object ReplSpec extends DefaultRunnableSpec {
                     Response.ResultSet(
                       ZStream.fromEffect(
                         ZIO
-                          .succeed(Timed(List {
+                          .succeed(Timed(Page(List {
                             Map(
                               "id" -> new AttributeValue().withS("abc"),
                               "size" -> new AttributeValue().withN("2")
                             )
-                          }, 1.second))
+                          }, hasMore = true), 1.second))
                       ) ++ ZStream.fromEffect(
                         Task.fail(new Exception("second page failed"))
                       )
@@ -213,6 +214,7 @@ object ReplSpec extends DefaultRunnableSpec {
            |"abc"   2
            |
            |Completed in 1000 ms
+           |Press q to quit, any key to load next page.
            |[error] second page failed
            |""".stripMargin
               )
@@ -238,12 +240,12 @@ object ReplSpec extends DefaultRunnableSpec {
                 Task.succeed(
                   Response.ResultSet(
                     ZStream(
-                      Timed(List {
+                      Timed(Page(List {
                         Map(
                           "id" -> new AttributeValue().withS("abc"),
                           "size" -> new AttributeValue().withN("2")
                         )
-                      }, 1.second)
+                      }, hasMore = false), 1.second)
                     )
                   )
                 )
@@ -280,11 +282,11 @@ object ReplSpec extends DefaultRunnableSpec {
                   Response.ResultSet(
                     ZStream(
                       Timed(
-                        List {
+                        Page(List {
                           Map(
                             "count" -> new AttributeValue().withN("20")
                           )
-                        },
+                        }, hasMore = false),
                         1.second
                       )
                     )

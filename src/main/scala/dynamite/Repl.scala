@@ -11,15 +11,12 @@ import jline.console.history.FileHistory
 import zio.logging.Logging
 import dynamite.Ast._
 import dynamite.Parser.ParseException
-import dynamite.Response.{Complete, KeySchema, Paged, ResultPage}
+import dynamite.Response.{Complete, KeySchema, ResultPage}
 import fansi._
 import zio._
 import zio.console.{putStrLn, Console}
 import zio.config.Config
 import java.io.{Closeable, File, PrintWriter, StringWriter}
-
-import zio.stream.ZStream
-
 import scala.jdk.CollectionConverters._
 
 object Repl {
@@ -69,69 +66,20 @@ object Repl {
     out.println(output)
   }
 
-  def handlePage[R, A](
-      out: PrintWriter,
-      page: Paged[R, A],
-      reader: Reader
-  )(process: A => RIO[R, Any]): RIO[R, Paged[R, A]] =
-    page.runHead
-      .foldM(
-        error =>
-          //        //TODO: if results is less than page size, finish early?
-          //      //case Failure(ex) if Option(ex.getMessage).exists(_.startsWith("The provided key element does not match the schema")) =>
-          Task {
-            val message =
-              Option(error.getMessage)
-                .getOrElse("Failed loading page")
-            reader.resetPagination()
-            //ex.printStackTrace()
-            //println(s"$ex ${ex.getClass} ${ex.getCause}")
-            //TODO: file error logger
-            out.println(formatError(message))
-            ZStream.empty
-          }, {
-          case Some(Timed(values, duration)) =>
-            for {
-              _ <- process(values)
-              _ <- ZIO {
-                out.println(s"Completed in ${duration.toMillis} ms")
-              }
-              //TODO: do this next iteration?
-              tail = page.drop(1)
-              result <- tail.runHead
-                .catchAll(_ => Task.succeed(None))
-                .flatMap {
-                  case Some(element) =>
-                    ZIO(
-                      out.println("Press q to quit, any key to load next page.")
-                    ) *> ZIO
-                      .succeed(ZStream(element) ++ tail.drop(1))
-                  case None =>
-                    ZIO
-                      .succeed(tail)
-                }
-            } yield result
-          case None => ZIO.succeed(ZStream.empty)
-        }
-      )
-
-  def renderPage(
+  def printPage[R, A](
       out: PrintWriter,
       reader: Reader,
       format: Ast.Format,
-      paging: ResultPage
-  ): RIO[Eval.Env, ResultPage] = {
-    reader.clearPrompt()
-    reader.disableEcho()
-
-    handlePage[Eval.Env, PageType](out, paging, reader) {
-      case PageType.TablePaging(select, values) =>
+      page: PageType
+  ): Task[Unit] =
+    page match {
+      case PageType.TablePaging(select, values, _) =>
         //TODO: offer vertical printing method
         format match {
           case Ast.Format.Json =>
             //TODO: paginate json output to avoid flooding terminal
             Task
-              .foreach(values) { value =>
+              .foreach_(values) { value =>
                 Script
                   .printDynamoObject(value, pretty = true)
                   .flatMap(value => Task(out.println(value)))
@@ -143,7 +91,7 @@ object Repl {
               width = Some(reader.terminalWidth)
             ).map(out.print)
         }
-      case PageType.TableNamePaging(tableNames) =>
+      case PageType.TableNamePaging(tableNames, _) =>
         Task(
           out.println(
             Table(
@@ -154,7 +102,7 @@ object Repl {
           )
         ).when(tableNames.nonEmpty)
     }
-  }
+  //TODO: if results is less than page size, finish early?
 
   def paginate(
       out: PrintWriter,
@@ -162,24 +110,39 @@ object Repl {
       format: Ast.Format,
       page: ResultPage
   ): RIO[Eval.Env, Unit] = {
-    for {
-      paging <- renderPage(out, reader, format, page)
-      () <- Task(out.flush())
-      result <- paging.runHead.flatMap {
-        case None    => Task.unit
-        case Some(_) =>
+    def waitForConfirmation() =
+      for {
+        () <- ZIO {
+          out.println("Press q to quit, any key to load next page.")
+          out.flush()
+        }
+        line <- Task(reader.readCharacter().toChar.toString)
+        // q is used to quit pagination
+      } yield {
+        if (line != null) {
+          line.trim != "q"
+        } else true
+      }
+
+    page.foreachWhile {
+      case Timed(result, duration) =>
+        //TODO: don't show q unless another page is available
+        for {
+          () <- Task {
+            reader.clearPrompt()
+            reader.disableEcho()
+          }
+          _ <- printPage(out, reader, format, result)
+          () <- ZIO {
+            out.println(s"Completed in ${duration.toMillis} ms")
+          }
+          () <- Task(out.flush())
           // While paging, a single char is read so that a new line is not required to
           // go the next page, or quit the pager
-          val line = reader.readCharacter().toChar.toString
-          if (line != null) {
-            val trimmed = line.trim
-            // q is used to quit pagination
-            if (trimmed != "q") {
-              paginate(out, reader, format, paging)
-            } else Task.unit
-          } else Task.unit
-      }
-    } yield result
+          result <- if (result.hasMore) waitForConfirmation()
+          else Task.succeed(false)
+        } yield result
+    }
   }.ensuring(ZIO {
     reader.resetPagination()
   }.orDie)
@@ -196,7 +159,8 @@ object Repl {
       //TODO: add flag with query cost
       paginate(out, reader, format, resultSet.map { page =>
         page.copy(
-          result = PageType.TablePaging(select, page.result)
+          result =
+            PageType.TablePaging(select, page.result.data, page.result.hasMore)
         )
       })
     //  PageType.TablePaging(select, resultSet))
@@ -214,7 +178,7 @@ object Repl {
     case (ShowTables, Response.TableNames(resultSet)) =>
       paginate(out, reader, format, resultSet.map { page =>
         page.copy(
-          result = PageType.TableNamePaging(page.result)
+          result = PageType.TableNamePaging(page.result, hasMore = false)
         )
       })
     case (_: DescribeTable, description: Response.TableDescription) =>
