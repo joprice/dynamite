@@ -52,7 +52,8 @@ object Ast {
   final case class CreateTable(
       tableName: String,
       name: String,
-      typeName: String
+      typeName: String,
+      ignoreExisting: Boolean
   ) extends Query
 
   case object ShowTables extends Query

@@ -398,13 +398,25 @@ object ParserSpec extends DefaultRunnableSpec {
         )
       )
     ),
-    test("support false")(
+    test("create table")(
       validate(
         """create table users(userId string)""",
         CreateTable(
           tableName = "users",
           name = "userId",
-          typeName = "string"
+          typeName = "string",
+          ignoreExisting = false
+        )
+      )
+    ),
+    test("create table if not exists")(
+      validate(
+        """create table if not exists users(userId string)""",
+        CreateTable(
+          tableName = "users",
+          name = "userId",
+          typeName = "string",
+          ignoreExisting = true
         )
       )
     )

@@ -16,6 +16,7 @@ import dynamite.Eval.{
   UnknownTableException
 }
 import dynamite.Response.{Index, KeySchema, ResultSet, TableDescription}
+import dynamite.ScriptSpec.cleanupTable
 import play.api.libs.json.{JsValue, Json}
 import zio.random.Random
 import zio.stream.ZStream
@@ -99,7 +100,7 @@ object EvalSpec extends DefaultRunnableSpec {
         )
       },
       testM("create table") {
-        for {
+        (for {
           _ <- run(query = s"create table users (userId string)")
           _ <- run(query = s"create table products (userId string)")
           tables <- ZStream.accessStream[Dynamo](_.get.listTables).runCollect
@@ -116,7 +117,27 @@ object EvalSpec extends DefaultRunnableSpec {
               )
             )
           )
-        }
+        }).ensuring(cleanupTable("users"))
+          .ensuring(cleanupTable("products"))
+      },
+      testM("create table if not exists") {
+        (for {
+          _ <- run(query = s"create table users (userId string)")
+          _ <- run(query = s"create table if not exists users (userId string)")
+          tables <- ZStream.accessStream[Dynamo](_.get.listTables).runCollect
+        } yield {
+          assert(tables)(
+            equalTo(
+              List(
+                List(
+                  "eval-spec",
+                  "eval-spec-range-key",
+                  "users"
+                )
+              )
+            )
+          )
+        }).ensuring(cleanupTable("users"))
       },
       testM("allow selecting all fields") {
         validate(s"select * from $tableName", List(Seed.seedData))
