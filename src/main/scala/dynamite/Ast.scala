@@ -87,6 +87,17 @@ object Ast {
 
   sealed abstract class Value extends Product with Serializable
 
+  object Value {
+    def typeName(value: Value) = value match {
+      case _: NumberValue => "number"
+      case _: StringValue => "string"
+      case _: BoolValue   => "boolean"
+      case _: ListValue   => "list"
+      case _: ObjectValue => "object"
+    }
+
+  }
+
   sealed abstract class KeyValue extends Value
 
   final case class StringValue(value: String) extends KeyValue

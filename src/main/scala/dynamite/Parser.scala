@@ -158,8 +158,8 @@ object Parser {
         // it would be nice to have column names be optional, but there is no
         // stable order of a dynamo schema. Some convention could be introduced, but it
         // might surprising. Optional feature?
-        "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ spaces ~
-        keyword("values") ~ spaces ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
+        "(" ~/ space.rep ~ commaSeparated(ident) ~ space.rep ~ ")" ~ space.rep ~
+        keyword("values") ~ space.rep ~ "(" ~ space.rep ~ commaSeparated(value) ~ ")"
     ).map {
       case (table, keys, values) =>
         val pairs = keys.zip(values)

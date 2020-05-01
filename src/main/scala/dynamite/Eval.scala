@@ -10,6 +10,7 @@ import com.amazonaws.services.dynamodbv2.model.{
 }
 import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 import dynamite.Response._
+
 import scala.jdk.CollectionConverters._
 import dynamite.Dynamo.Dynamo
 import zio._
@@ -30,7 +31,7 @@ object Eval {
         select(query, pageSize, tableCache)
       case query: Update      => update(query)
       case query: Delete      => delete(query)
-      case query: Insert      => insert(query)
+      case query: Insert      => insert(query, tableCache)
       case query: CreateTable => createTable(query)
       case ShowTables         => Task.succeed(showTables)
       case DescribeTable(table) =>
@@ -341,18 +342,67 @@ object Eval {
         .as(Complete)
     } yield result
 
-  def insert(
-      query: Insert
-  ): RIO[Dynamo, Complete.type] = {
-    val item = query.values
-      .foldLeft(Map[String, AttributeValue]()) {
-        case (item, (field, value)) =>
-          item.updated(field, toAttributeValue(value))
+  def loadTableDescription[R](tableCache: TableCache[R], tableName: String) =
+    tableCache
+      .get(tableName)
+      .foldM(
+        {
+          case _: ResourceNotFoundException =>
+            Task.fail(UnknownTableException(tableName))
+          case error => Task.fail(error)
+        },
+        table =>
+          table.fold[Task[TableDescription]](
+            Task.fail(UnknownTableException(tableName))
+          )(Task.succeed(_))
+      )
+
+  def insert[R](
+      query: Insert,
+      tableCache: TableCache[R]
+  ): RIO[R with Dynamo, Complete.type] = {
+    def toKey(name: String, value: Value): Task[Key] =
+      value match {
+        //TODO: case object exception
+        case value: KeyValue => Task.succeed(Key(name, value))
+        case _: BoolValue | _: ListValue | _: ObjectValue =>
+          Task.fail(
+            new Exception(
+              s"Invalid type for key $name: ${Value.typeName(value)}. Keys may only be strings or numbers"
+            )
+          )
       }
-    //TODO: timed
-    Dynamo
-      .putItem(query.table, item)
-      .as(Complete)
+    for {
+      tableDescription <- loadTableDescription(tableCache, query.table)
+      hash <- query.values
+        .find(_._1 == tableDescription.hash.name)
+        .map((toKey _).tupled)
+        .getOrElse(
+          Task.fail(
+            new Exception(s"Missing hash key ${tableDescription.hash.name}")
+          )
+        )
+      range <- ZIO.foreach(
+        tableDescription.range
+          .map(_.name)
+          .flatMap(value => query.values.find(_._1 == value))
+      )((toKey _).tupled)
+      () <- validateKeyType(
+        tableDescription,
+        index = None,
+        //TODO: make this not take option (only applies to scan)
+        primaryKey = Ast.PrimaryKey(hash, range)
+      )
+      item = query.values
+        .foldLeft(Map[String, AttributeValue]()) {
+          case (item, (field, value)) =>
+            item.updated(field, toAttributeValue(value))
+        }
+      //TODO: timed
+      result <- Dynamo
+        .putItem(query.table, item)
+        .as(Complete)
+    } yield result
   }
 
   //TODO: condition expression that item must exist?
@@ -401,7 +451,7 @@ object Eval {
   def validateKeyType(
       tableDescription: TableDescription,
       index: Option[Index],
-      query: Select
+      primaryKey: Ast.PrimaryKey
   ): Task[Unit] = {
     def validate(schema: KeySchema, key: KeySchema) = {
       def renderScalar(`type`: ScalarAttributeType) =
@@ -427,22 +477,16 @@ object Eval {
         case _: NumberValue => ScalarAttributeType.N
       })
 
-    query.where
-      .map { where =>
-        (keyToKeySchema(where.hash), where.range.map(keyToKeySchema))
-      }
-      .map {
-        case (hash, range) =>
-          val (tableHash, tableRange) = index
-            .map(index => (index.hash, index.range))
-            .getOrElse((tableDescription.hash, tableDescription.range))
+    val hash = keyToKeySchema(primaryKey.hash)
+    val range = primaryKey.range.map(keyToKeySchema)
+    val (tableHash, tableRange) = index
+      .map(index => (index.hash, index.range))
+      .getOrElse((tableDescription.hash, tableDescription.range))
 
-          validate(tableHash, hash) *>
-            tableRange
-              .zip(range)
-              .fold[Task[Unit]](Task.unit)((validate _).tupled)
-      }
-      .getOrElse(Task.unit)
+    validate(tableHash, hash) *>
+      tableRange
+        .zip(range)
+        .fold[Task[Unit]](Task.unit)((validate _).tupled)
   }
 
   def select(
@@ -574,7 +618,9 @@ object Eval {
 
       for {
         index <- getIndex
-        () <- validateKeyType(tableDescription, index, query)
+        () <- ZIO.foreach_(query.where)(
+          validateKeyType(tableDescription, index, _)
+        )
         result <- index
           .map { index =>
             //TODO: check types as well?
@@ -617,7 +663,9 @@ object Eval {
           }
         }
         .flatMap { maybeIndex =>
-          validateKeyType(tableDescription, maybeIndex, query) *>
+          ZIO.foreach_(query.where)(
+            validateKeyType(tableDescription, maybeIndex, _)
+          ) *>
             maybeIndex
               .map { index =>
                 validateOrderBy(index.hash, index.range, query.orderBy) as
