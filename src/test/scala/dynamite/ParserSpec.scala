@@ -214,6 +214,18 @@ object ParserSpec extends DefaultRunnableSpec {
         )
       )
     ),
+    test("tolerate missing spaces around values")(
+      validate(
+        "insert into playlists (id, tracks) values(1, [])",
+        Insert(
+          "playlists",
+          Seq(
+            "id" -> IntValue("1"),
+            "tracks" -> ListValue(Seq.empty)
+          )
+        )
+      )
+    ),
     test("tolerate spaces around limit")(
       validate(
         "select id, name from playlist    limit 10",

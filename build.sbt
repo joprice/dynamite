@@ -187,3 +187,8 @@ import dynamite._
 
 reporterConfig := reporterConfig.value.withShowLegend(false)
 reporterConfig := reporterConfig.value.withReverseOrder(true)
+
+// disable docs since this is not a library
+publishArtifact in (Compile, packageDoc) := false
+publishArtifact in packageDoc := false
+sources in (Compile,doc) := Seq.empty
