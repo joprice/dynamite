@@ -160,6 +160,18 @@ object EvalSpec extends DefaultRunnableSpec {
             .map(_.getMessage)
         )(equalTo("Wrong type for key userId. Expected string, found number"))
       },
+      testM("check key type on update") {
+        assertM(
+          run(s"update $tableName set id = 3 where userId = 1").flip
+            .map(_.getMessage)
+        )(equalTo("Wrong type for key userId. Expected string, found number"))
+      },
+      testM("check key type on delete") {
+        assertM(
+          run(s"delete from $tableName where userId = 1").flip
+            .map(_.getMessage)
+        )(equalTo("Wrong type for key userId. Expected string, found number"))
+      },
       testM("allow reversing the results ") {
         validate(
           s"select * from $tableName where userId = 'user-id-1' order by id desc",
