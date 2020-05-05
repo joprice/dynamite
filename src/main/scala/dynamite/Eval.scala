@@ -29,8 +29,8 @@ object Eval {
     query match {
       case query: Select =>
         select(query, pageSize, tableCache)
-      case query: Update      => update(query)
-      case query: Delete      => delete(query)
+      case query: Update      => update(query, tableCache)
+      case query: Delete      => delete(query, tableCache)
       case query: Insert      => insert(query, tableCache)
       case query: CreateTable => createTable(query)
       case ShowTables         => Task.succeed(showTables)
@@ -406,47 +406,69 @@ object Eval {
   }
 
   //TODO: condition expression that item must exist?
-  def delete(
-      query: Delete
-  ): RIO[Dynamo, Complete.type] = {
-    //TODO: optionally return consumed capacity
-    //.getConsumedCapacity
-    val Key(hashKey, hashValue) = query.key.hash
-    val range = query.key.range.map {
-      case Key(rangeKey, rangeValue) => (rangeKey, toAttributeValue(rangeValue))
-    }
-    //TODO: timed
-    Dynamo
-      .deleteItem(
-        tableName = query.table,
-        hash = (hashKey, toAttributeValue(hashValue)),
-        range = range
+  def delete[R](
+      query: Delete,
+      tableCache: TableCache[R]
+  ): RIO[R with Dynamo, Complete.type] =
+    for {
+      tableDescription <- loadTableDescription(tableCache, query.table)
+      () <- validateKeyType(
+        tableDescription,
+        index = None,
+        //TODO: make this not take option (only applies to scan)
+        primaryKey = query.key
       )
-      .as(Complete)
-  }
-
-  //TODO: change response to more informative type
-  def update(
-      query: Update
-  ): RIO[Dynamo, Complete.type] =
-    recoverQuery(
-      query.table, {
+      result <- {
+        //TODO: optionally return consumed capacity
+        //.getConsumedCapacity
         val Key(hashKey, hashValue) = query.key.hash
+        val range = query.key.range.map {
+          case Key(rangeKey, rangeValue) =>
+            (rangeKey, toAttributeValue(rangeValue))
+        }
+        //TODO: timed
         Dynamo
-          .updateItem(
-            query.table,
-            hash = hashKey -> toAttributeValue(hashValue),
-            range = query.key.range.map {
-              case Key(rangeKey, rangeValue) =>
-                rangeKey -> toAttributeValue(rangeValue)
-            },
-            fields = query.fields.map {
-              case (key, value) => key -> toAttributeValue(value)
-            }
+          .deleteItem(
+            tableName = query.table,
+            hash = (hashKey, toAttributeValue(hashValue)),
+            range = range
           )
           .as(Complete)
       }
-    )
+    } yield result
+
+  //TODO: change response to more informative type
+  def update[R](
+      query: Update,
+      tableCache: TableCache[R]
+  ): RIO[R with Dynamo, Complete.type] =
+    for {
+      tableDescription <- loadTableDescription(tableCache, query.table)
+      () <- validateKeyType(
+        tableDescription,
+        index = None,
+        //TODO: make this not take option (only applies to scan)
+        primaryKey = query.key
+      )
+      result <- recoverQuery(
+        query.table, {
+          val Key(hashKey, hashValue) = query.key.hash
+          Dynamo
+            .updateItem(
+              query.table,
+              hash = hashKey -> toAttributeValue(hashValue),
+              range = query.key.range.map {
+                case Key(rangeKey, rangeValue) =>
+                  rangeKey -> toAttributeValue(rangeValue)
+              },
+              fields = query.fields.map {
+                case (key, value) => key -> toAttributeValue(value)
+              }
+            )
+            .as(Complete)
+        }
+      )
+    } yield result
 
   def validateKeyType(
       tableDescription: TableDescription,
