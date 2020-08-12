@@ -6,7 +6,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.13.2"
+scalaVersion := "2.13.3"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -174,7 +174,7 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
-addCompilerPlugin("io.tryp" % "splain" % "0.5.4" cross CrossVersion.patch)
+addCompilerPlugin("io.tryp" % "splain" % "0.5.7" cross CrossVersion.patch)
 
 // allows using unsafeRun for experimenting in console
 consoleQuick / initialCommands := """
