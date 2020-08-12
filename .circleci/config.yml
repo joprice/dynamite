@@ -1,12 +1,11 @@
 version: 2
 jobs:
   build:
-    #working_directory: ~/samplescala
     docker:
-      - image: hseeberger/scala-sbt:11.0.6_1.3.10_2.13.1
+      - image: hseeberger/scala-sbt:11.0.7_1.3.13_2.13.3
 
     environment:
-      SBT_VERSION: 1.3.10
+      SBT_VERSION: 1.3.13
       SBT_OPTS: "-Xmx1G -XX:MaxMetaspaceSize=384M -XX:+UseCompressedOops"
     steps:
       - run: echo 'export ARTIFACT_BUILD=$CIRCLE_PROJECT_REPONAME-$CIRCLE_BUILD_NUM.zip' >> $BASH_ENV
