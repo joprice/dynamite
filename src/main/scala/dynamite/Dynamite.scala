@@ -75,13 +75,13 @@ object Dynamite extends App {
       .foldM(
         {
           case ConfigLoadFailure =>
-            ZIO.succeed(1)
+            ZIO.succeed(ExitCode.failure)
           case error =>
             log
               .throwable("An unhandled error occurred", error)
-              .as(1)
+              .as(ExitCode.failure)
         },
-        _ => ZIO.succeed(0)
+        _ => ZIO.succeed(ExitCode.success)
       )
       .provideCustomLayer(logging)
 }

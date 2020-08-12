@@ -740,14 +740,12 @@ object Eval {
       //TODO: scan doesn't support order (because doesn't on hash key?)
       val (aggregates, fields) = resolveProjection(query.projection)
       val results =
-        ZStream(
-          Dynamo
-            .scan(query.from, fields, limit = query.limit)
-            .map(Page.tupled)
-            .process
-            //TODO: replace with built-in .timed
-            .map(Timed.apply(_))
-        )
+        Dynamo
+          .scan(query.from, fields, limit = query.limit)
+          .map(Page.tupled)
+          //TODO: use process to time pull from stream
+          //TODO: replace with built-in .timed
+          .mapM(result => Timed(ZIO(result)))
       (
         aggregates,
         ResultSet(

@@ -13,7 +13,9 @@ object DynamiteConfigSpec extends DefaultRunnableSpec {
         deleted <- if (file.isFile) {
           Task(file.delete())
         } else {
-          Task.foreach(file.listFiles())(deleteFile(_)) *> Task(file.delete())
+          Task.foreach(file.listFiles().toSeq)(deleteFile(_)) *> Task(
+            file.delete()
+          )
         }
         () <- if (!deleted) {
           Task.fail(new Exception(s"Failed to delee file $file"))

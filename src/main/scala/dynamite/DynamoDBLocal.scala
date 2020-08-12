@@ -1,7 +1,7 @@
 package dynamite
 
 import com.amazonaws.services.dynamodbv2.local.main.ServerRunner
-import zio.{App, ZIO, ZManaged}
+import zio.{App, ExitCode, ZIO, ZManaged}
 import zio.logging.{log, Logging}
 
 object DynamoDBLocal extends App {
@@ -19,7 +19,7 @@ object DynamoDBLocal extends App {
     val minPort = 10000
     val maxPort = 65535
     zio.random
-      .nextInt(maxPort - minPort)
+      .nextIntBetween(minPort, maxPort)
       .map(_ + minPort)
   }
 
@@ -32,8 +32,9 @@ object DynamoDBLocal extends App {
         error =>
           log
             .throwable("An unhandled error occurred", error)
-            .as(1),
+            .as(ExitCode.failure),
         ZIO.succeed(_)
       )
       .provideCustomLayer(logging)
+      .exitCode
 }
