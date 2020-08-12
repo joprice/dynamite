@@ -3,7 +3,6 @@ package dynamite
 import dynamite.Ast.{Format => _, _}
 import jline.internal.Ansi
 import zio._
-import zio.config.Config
 import com.amazonaws.services.dynamodbv2.model.AttributeValue
 import dynamite.Dynamo.DynamoObject
 import dynamite.Response.Complete
@@ -69,7 +68,7 @@ object Script {
       })
       .orElse(Option(value.getL).map { value =>
         Task
-          .foreach(value.asScala)(item => attributeValueToJson(item))
+          .foreach(value.asScala.toSeq)(item => attributeValueToJson(item))
           .map(JsArray(_))
       })
       .getOrElse {
@@ -78,7 +77,7 @@ object Script {
 
   def dynamoObjectToJson(value: DynamoObject): Task[JsValue] =
     Task
-      .foreach(value) {
+      .foreach(value.toSeq) {
         case (key, value) =>
           attributeValueToJson(value).map(key -> _)
       }
@@ -89,7 +88,7 @@ object Script {
   //TODO: typed error
   def apply(
       input: String
-  ): ZIO[Config[DynamiteConfig] with Console with Eval.Env with Has[
+  ): ZIO[Has[DynamiteConfig] with Console with Eval.Env with Has[
     Opts
   ], Throwable, Unit] =
     for {

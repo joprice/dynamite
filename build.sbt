@@ -69,8 +69,8 @@ resolvers ++= Seq(
 // for DynamoDBLocal
 classpathTypes ++= Set("dylib", "so")
 
-val zioVersion = "1.0.0-RC18-2"
-val zioConfigVersion = "1.0.0-RC16-2"
+val zioVersion = "1.0.0"
+val zioConfigVersion = "1.0.0-RC26"
 val awsVersion = "1.11.770"
 
 libraryDependencies ++= Seq(
@@ -85,7 +85,7 @@ libraryDependencies ++= Seq(
   "dev.zio" %% "zio-config" % zioConfigVersion,
   "dev.zio" %% "zio-config-typesafe" % zioConfigVersion,
   "dev.zio" %% "zio-config-magnolia" % zioConfigVersion,
-  "dev.zio" %% "zio-logging" % "0.2.7",
+  "dev.zio" %% "zio-logging" % "0.4.0",
   "dev.zio" %% "zio-streams" % zioVersion,
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,

@@ -30,7 +30,6 @@ import com.amazonaws.services.dynamodbv2.model.{
   _
 }
 import org.apache.http.conn.HttpHostConnectException
-import zio.config.Config
 import zio.stream.ZStream
 
 object Dynamo {
@@ -75,7 +74,7 @@ object Dynamo {
     ZLayer.fromAcquireRelease(
       for {
         opts <- ZIO.access[Has[Opts]](_.get)
-        config <- ZIO.access[Config[DynamiteConfig]](_.get)
+        config <- ZIO.access[Has[DynamiteConfig]](_.get)
       } yield dynamoClient(config, opts)
     )(client => ZIO.effectTotal(client.shutdown()))
 

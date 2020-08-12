@@ -20,7 +20,7 @@ import DynamoDBTestHelpers._
 import play.api.libs.json.{JsValue, Json}
 import zio.random.Random
 import zio.stream.ZStream
-import zio.{Has, Task, ZIO, ZManaged}
+import zio.{Chunk, Has, Task, ZIO, ZManaged}
 import zio.test._
 import zio.test.Assertion._
 
@@ -63,7 +63,7 @@ object EvalSpec extends DefaultRunnableSpec {
   //TODO: restructure test to use Access for client/table, to avoid recreating table
   def validate(
       query: String,
-      expected: List[List[JsValue]]
+      expected: Chunk[List[JsValue]]
   ): ZIO[Random with DynamoClient with Eval.Env, Throwable, TestResult] =
     run(query)
       .flatMap {
@@ -86,7 +86,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("select all records from dynamo") {
         validate(
           s"select id, name from $tableName",
-          List(
+          Chunk(
             List(
               Json.obj("id" -> 1, "name" -> "Chill Times"),
               Json.obj("id" -> 2, "name" -> "EDM4LYFE"),
@@ -104,7 +104,7 @@ object EvalSpec extends DefaultRunnableSpec {
         } yield {
           assert(tables)(
             equalTo(
-              List(
+              Chunk(
                 List(
                   "eval-spec",
                   "eval-spec-range-key",
@@ -125,7 +125,7 @@ object EvalSpec extends DefaultRunnableSpec {
         } yield {
           assert(tables)(
             equalTo(
-              List(
+              Chunk(
                 List(
                   "eval-spec",
                   "eval-spec-range-key",
@@ -137,12 +137,12 @@ object EvalSpec extends DefaultRunnableSpec {
         }).ensuring(cleanupTable("users"))
       },
       testM("allow selecting all fields") {
-        validate(s"select * from $tableName", List(Seed.seedData))
+        validate(s"select * from $tableName", Chunk(Seed.seedData))
       },
       testM("allow explicit ascending order") {
         validate(
           s"select * from $tableName where userId = 'user-id-1' order by id asc",
-          List(
+          Chunk(
             Seed.seedData
               .filter(json => (json \ "userId").as[String] == "user-id-1")
           )
@@ -175,7 +175,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("allow reversing the results ") {
         validate(
           s"select * from $tableName where userId = 'user-id-1' order by id desc",
-          List(
+          Chunk(
             Seed.seedData
               .filter(json => (json \ "userId").as[String] == "user-id-1")
               .reverse
@@ -189,7 +189,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("select all records for a given user") {
         validate(
           s"select name from $tableName where userId = 'user-id-1'",
-          List(
+          Chunk(
             List(
               Json.obj("name" -> "Chill Times"),
               Json.obj("name" -> "EDM4LYFE")
@@ -200,7 +200,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("limit results") {
         validate(
           s"select name from $tableName where userId = 'user-id-1' limit 1",
-          List(
+          Chunk(
             List(
               Json.obj("name" -> "Chill Times")
             )
@@ -214,7 +214,7 @@ object EvalSpec extends DefaultRunnableSpec {
         ) *>
           validate(
             s"select name from $tableName where userId = 'user-id-1' and id = 1",
-            List(
+            Chunk(
               List(
                 Json.obj("name" -> newName)
               )
@@ -233,7 +233,7 @@ object EvalSpec extends DefaultRunnableSpec {
         ) *>
           validate(
             s"select * from $tableName where userId = '$userId' and id = $id",
-            List(
+            Chunk(
               List(
                 first ++ Json.obj(
                   "meta" -> Json.obj(
@@ -256,7 +256,7 @@ object EvalSpec extends DefaultRunnableSpec {
           ) *>
           validate(
             s"select name from $rangeKeyTableName where userId = '$userId'",
-            List(
+            Chunk(
               List(
                 Json.obj("name" -> newName)
               )
@@ -269,7 +269,7 @@ object EvalSpec extends DefaultRunnableSpec {
         ) *>
           validate(
             s"select name from $tableName where userId = 'user-id-1' and id = 1",
-            List(List())
+            Chunk(List())
           )
       },
       testM("support inserting a record") {
@@ -279,7 +279,7 @@ object EvalSpec extends DefaultRunnableSpec {
         ) *>
           validate(
             s"select name from $tableName where userId = 'user-id-1' and id = 20",
-            List(
+            Chunk(
               List(
                 Json.obj("name" -> newName)
               )
@@ -293,7 +293,7 @@ object EvalSpec extends DefaultRunnableSpec {
         ) *>
           validate(
             s"select duration from $tableName where userId = 'user-id-1' and id = 20",
-            List(
+            Chunk(
               List(
                 Json.obj("duration" -> 1.1)
               )
@@ -304,7 +304,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("use an index when unambiguous") {
         validate(
           s"select id from $tableName where userId = 'user-id-1' and name = 'EDM4LYFE'",
-          List(
+          Chunk(
             List(
               Json.obj("id" -> 2)
             )
@@ -328,7 +328,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("use an explicit index when provided") {
         validate(
           s"select id from $tableName where userId = 'user-id-1' and duration = 10 use index playlist-length-keys-only",
-          List(
+          Chunk(
             List(
               Json.obj("id" -> 2),
               Json.obj("id" -> 1)
@@ -407,7 +407,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("query against an explicit index") {
         validate(
           s"select id from $tableName where name = 'Disco Fever' use index playlist-name-global",
-          List(
+          Chunk(
             List(
               Json.obj("id" -> 3)
             )
@@ -417,7 +417,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("query against an index when unambiguous") {
         validate(
           s"select id from $tableName where name = 'Disco Fever'",
-          List(
+          Chunk(
             List(
               Json.obj("id" -> 3)
             )
@@ -427,7 +427,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("aggregate supports count") {
         validate(
           s"select count(*) from $tableName",
-          List(
+          Chunk(
             List(
               Json.obj("count" -> 4)
             )
@@ -437,7 +437,7 @@ object EvalSpec extends DefaultRunnableSpec {
       testM("support count with filters") {
         validate(
           s"select count(*) from $tableName where userId = 'user-id-1'",
-          List(
+          Chunk(
             List(
               Json.obj("count" -> 2)
             )

@@ -15,7 +15,6 @@ import dynamite.Response.{Complete, KeySchema, ResultPage}
 import fansi._
 import zio._
 import zio.console.{putStrLn, Console}
-import zio.config.Config
 import java.io.{Closeable, File, PrintWriter, StringWriter}
 import scala.jdk.CollectionConverters._
 
@@ -270,7 +269,7 @@ object Repl {
     Unit
   ] =
     for {
-      config <- ZIO.access[Config[DynamiteConfig]](_.get)
+      config <- ZIO.access[Has[DynamiteConfig]](_.get)
       result <- run(runtime, config)
     } yield result
 
@@ -362,7 +361,7 @@ object Repl {
       })
       .orElse(
         Option(value.getL)
-          .map(list => Task.foreach(list.asScala)(renderAttribute))
+          .map(list => Task.foreach(list.asScala.toSeq)(renderAttribute _))
           .orElse(
             Option(value.getSS)
               .map(_.asScala.map(quoteString))
@@ -377,7 +376,7 @@ object Repl {
 
   def renderRow(item: DynamoObject): Task[Map[String, String]] =
     ZIO
-      .foreach(item) {
+      .foreach(item.toSeq) {
         case (key, value) =>
           renderAttribute(value).map(key -> _)
       }
