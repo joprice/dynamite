@@ -11,15 +11,15 @@ jobs:
       - run: echo 'export ARTIFACT_BUILD=$CIRCLE_PROJECT_REPONAME-$CIRCLE_BUILD_NUM.zip' >> $BASH_ENV
       - checkout
       - restore_cache:
-          key: sbt-cache
+          key: sbt-cache-2
       - run:
           name: validate
           command: cat /dev/null | sbt validate
-      - store_artifacts: # for display in Artifacts: https://circleci.com/docs/2.0/artifacts/
-          path: target/universal/samplescala.zip
-          destination: samplescala
+      #- store_artifacts: # for display in Artifacts: https://circleci.com/docs/2.0/artifacts/
+      #    path: target/universal/samplescala.zip
+      #    destination: samplescala
       - save_cache:
-          key: sbt-cache
+          key: sbt-cache-2
           paths:
             - "~/.ivy2/cache"
             - "~/.sbt"
