@@ -41,12 +41,10 @@ object Script {
         )
         .map(result => Ansi.stripAnsi(result).trim)
     case Format.Json =>
-      println(s"values $values")
       Task
         .foreach(values)(dynamoObjectToJson)
         .map(_.mkString("\n"))
     case Format.JsonPretty =>
-      println(s"values $values")
       Task
         .foreach(values)(dynamoObjectToJson)
         .map(_.map(result => Json.prettyPrint(result)).mkString("\n"))
