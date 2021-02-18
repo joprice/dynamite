@@ -75,9 +75,15 @@ object DynamiteConfig {
   }
 
   def load(file: Option[File]) =
+    ZIO.succeed(
+      DynamiteConfig(
+        )
+    )
+  /*
     file
       .map(DynamiteConfig.parseConfig)
       .getOrElse {
         DynamiteConfig.loadConfig(DynamiteConfig.defaultConfigDir)
       }
+ */
 }

@@ -2,7 +2,7 @@ import sbtrelease.ReleaseStateTransformations._
 import ohnosequences.sbt.GithubRelease
 import org.kohsuke.github.GHRelease
 
-enablePlugins(JavaAppPackaging, BuildInfoPlugin)
+enablePlugins(JavaAppPackaging, BuildInfoPlugin, ScalaNativePlugin)
 
 buildInfoPackage := "dynamite"
 
