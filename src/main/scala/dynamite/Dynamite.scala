@@ -9,7 +9,7 @@ object Dynamite extends App {
 
   case object ConfigLoadFailure extends Exception("Failed to load config")
 
-  val logging = Logging.console((_, logEntry) => logEntry)
+  val logging = Logging.console()
 
   def loadOpts(args: List[String]) =
     Opts

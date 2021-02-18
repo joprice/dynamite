@@ -23,7 +23,7 @@ object DynamoDBLocal extends App {
       .map(_ + minPort)
   }
 
-  val logging = Logging.console((_, logEntry) => logEntry)
+  val logging = Logging.console()
 
   def run(args: List[String]) =
     dynamoServer(8080).useForever
