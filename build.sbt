@@ -6,7 +6,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.13.3"
+scalaVersion := "2.13.4"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -69,27 +69,26 @@ resolvers ++= Seq(
 // for DynamoDBLocal
 classpathTypes ++= Set("dylib", "so")
 
-val zioVersion = "1.0.0"
-val zioConfigVersion = "1.0.0-RC26"
-val awsVersion = "1.11.770"
+val zioVersion = "1.0.4-2"
+val zioConfigVersion = "1.0.0"
+val awsVersion = "1.11.957"
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "fastparse" % "2.3.0",
+  "com.lihaoyi" %% "fastparse" % "2.3.1",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % awsVersion,
   "com.amazonaws" % "aws-java-sdk-sts" % awsVersion,
   "jline" % "jline" % "2.14.6",
-  "com.lihaoyi" %% "fansi" % "0.2.9",
-  "com.github.scopt" %% "scopt" % "3.7.1",
+  "com.lihaoyi" %% "fansi" % "0.2.10",
+  "com.github.scopt" %% "scopt" % "4.0.0",
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  "com.typesafe" % "config" % "1.4.0",
   "dev.zio" %% "zio-config" % zioConfigVersion,
   "dev.zio" %% "zio-config-typesafe" % zioConfigVersion,
   "dev.zio" %% "zio-config-magnolia" % zioConfigVersion,
-  "dev.zio" %% "zio-logging" % "0.4.0",
+  "dev.zio" %% "zio-logging" % "0.5.6",
   "dev.zio" %% "zio-streams" % zioVersion,
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
-  "com.typesafe.play" %% "play-json" % "2.8.1",
+  "com.typesafe.play" %% "play-json" % "2.9.2",
   "com.amazonaws" % "DynamoDBLocal" % "1.11.477",
   "com.almworks.sqlite4java" % "sqlite4java" % dynamodbLocalVersion,
   "com.almworks.sqlite4java" % "libsqlite4java-osx" % dynamodbLocalVersion artifacts (Artifact(
@@ -174,7 +173,7 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
-addCompilerPlugin("io.tryp" % "splain" % "0.5.7" cross CrossVersion.patch)
+addCompilerPlugin("io.tryp" % "splain" % "0.5.8" cross CrossVersion.patch)
 
 // allows using unsafeRun for experimenting in console
 consoleQuick / initialCommands := """
