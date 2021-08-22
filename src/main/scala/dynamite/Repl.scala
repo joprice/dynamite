@@ -36,19 +36,8 @@ object Repl {
       Str(s"${key.name} [${Color.LightMagenta(renderType(key.`type`))}]")
 
     val headers = Seq("name", "hash", "range")
-    val output =
-      s"""${heading("schema")}
-         |${Table(
-           headers,
-           Seq(
-             Seq(
-               Str(description.name),
-               renderSchema(description.hash),
-               description.range.fold(Str(""))(renderSchema)
-             )
-           ),
-           None
-         )}
+    val indexes = if (description.indexes.nonEmpty) {
+      s"""
          |${heading("indexes")}
          |${Table(
            headers,
@@ -61,6 +50,20 @@ object Repl {
            },
            None
          )}""".stripMargin
+    } else ""
+    val output =
+      s"""${heading("schema")}
+         |${Table(
+           headers,
+           Seq(
+             Seq(
+               Str(description.name),
+               renderSchema(description.hash),
+               description.range.fold(Str(""))(renderSchema)
+             )
+           ),
+           None
+         )}""".stripMargin + indexes
 
     out.println(output)
   }
