@@ -471,9 +471,6 @@ object ReplSpec extends DefaultRunnableSpec {
            |name        hash              range
            |playlists   userId [string]   id [string]
            |
-           |indexes
-           |name   hash   range
-           |
            |""".stripMargin
               )
             )
