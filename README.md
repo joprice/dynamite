@@ -21,13 +21,22 @@ A limited subset of dynamo and sql are currently supported:
 dql> select * from playlists limit 10;
 ```
 
+When using a where clause, the table or an appropriate index will be used:
+
 ```sql
 dql> select * from playlists where userId = 1 and id = 2 limit 10;
+```
+
+If there are redundant indexes or for some reason an appropriate one cannnot be found, use `use index` to provide it explicitly:
+
+```sql
+dql> select * from playlists where userId = 1 limit 10 use index profileIdIndex;
 ```
 
 ```sql
 dql> select id, name from playlists limit 1;
 ```
+
 
 ### Insert
 
@@ -57,6 +66,8 @@ dql> show tables;
 ```sql
 dql> describe table playlists;
 ```
+
+
 
 ## Scripting
 
