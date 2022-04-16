@@ -1,0 +1,4 @@
+* add create table statement
+* add `--local` flag that starts a one-off dynamodb local instance and connects to it
+* validate key type on insert
+* only print index section of describe table command when at least one exists
