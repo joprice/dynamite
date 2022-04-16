@@ -7,69 +7,69 @@ import dynamite.Ast.Projection.{Aggregate, FieldSelector}
 //TODO: case insensitive keyword
 object Parser {
 
-  def keyword[_: P](value: String) = P(IgnoreCase(value))
+  def keyword[A: P](value: String) = P(IgnoreCase(value))
 
-  def opt[A, _: P](p: => P[A]): P[Option[A]] = (spaces ~ p).?
+  def opt[A, B: P](p: => P[A]): P[Option[A]] = (spaces ~ p).?
 
-  def commaSeparated[A, _: P](parser: => P[A]) =
+  def commaSeparated[A, B: P](parser: => P[A]) =
     parser.rep(1, sep = space.rep ~ "," ~/ space.rep)
 
-  def space[_: P] = P(" " | "\n")
+  def space[A: P] = P(" " | "\n")
 
-  def spaces[_: P] = P(space.rep(1))
+  def spaces[A: P] = P(space.rep(1))
 
   //TODO: use .opaque for this
-  def character[_: P] = P(CharIn("a-z", "A-Z", "0-9") | "-" | "_")
+  def character[A: P] = P(CharIn("a-z", "A-Z", "0-9") | "-" | "_")
 
   //TODO: support hyphens in fields?
-  def ident[_: P] = P(character.rep(1).!)
+  def ident[A: P] = P(character.rep(1).!)
 
-  def str[_: P](delim: Char) =
+  def str[A: P](delim: Char) =
     P(s"$delim" ~ CharsWhile(!s"$delim".contains(_)).rep.! ~ s"$delim")
 
-  def setField[A, _: P](value: => P[A]) =
+  def setField[A, B: P](value: => P[A]) =
     P(ident ~ space.rep ~ "=" ~ space.rep ~ value)
 
-  def string[_: P] = P(str('"') | str('\''))
+  def string[A: P] = P(str('"') | str('\''))
 
-  def digits[_: P] = P(CharsWhileIn("0-9"))
+  def digits[A: P] = P(CharsWhileIn("0-9"))
 
-  def integer[_: P] = P("-".? ~ ("0" | CharIn("1-9") ~ digits.?)).!
+  def integer[A: P] = P("-".? ~ ("0" | CharIn("1-9") ~ digits.?)).!
 
-  def float[_: P] = P("-".? ~ integer.? ~ "." ~ integer).!
-  def boolValue[_: P]: P[BoolValue] = P(
+  def float[A: P] = P("-".? ~ integer.? ~ "." ~ integer).!
+  def boolValue[A: P]: P[BoolValue] = P(
     P("true").map(_ => BoolValue(true)) |
       P("false").map(_ => BoolValue(false))
   )
-  def stringValue[_: P] = P(string.map(StringValue))
-  def floatValue[_: P] = P(float.map(FloatValue))
-  def integerValue[_: P] = P(integer.map(IntValue))
-  def numberValue[_: P] = P(floatValue | integerValue)
+  def stringValue[A: P] = P(string.map(StringValue))
+  def floatValue[A: P] = P(float.map(FloatValue))
+  def integerValue[A: P] = P(integer.map(IntValue))
+  def numberValue[A: P] = P(floatValue | integerValue)
 
   // keys support strings, number, and binary (TODO: support 'binary' input?)
-  def keyValue[_: P]: P[KeyValue] = P(stringValue | numberValue)
+  def keyValue[A: P]: P[KeyValue] = P(stringValue | numberValue)
 
   //TODO: distinguish set/list in some operations?
-  def listValue[_: P]: P[ListValue] =
+  def listValue[A: P]: P[ListValue] =
     P(
       "[" ~/ space.rep ~ commaSeparated(value).? ~ space.rep ~ "]"
     ).map(value => ListValue(value.getOrElse(Seq.empty)))
 
-  def objectValue[_: P]: P[ObjectValue] =
+  def objectValue[A: P]: P[ObjectValue] =
     P(
       "{" ~/ space.rep ~ commaSeparated(
         string ~ space.rep ~ ":" ~ space.rep ~ value
       ) ~ space.rep ~ "}"
     ).map(values => ObjectValue(values))
 
-  def value[_: P] = P(keyValue | listValue | objectValue | boolValue)
+  def value[A: P] = P(keyValue | listValue | objectValue | boolValue)
 
   //TODO: fail parse on invalid numbers?
-  def limit[_: P] = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
+  def limit[A: P] = P(keyword("limit") ~/ spaces ~ integer.map(_.toInt))
 
-  def key[_: P] = P(setField(keyValue).map(Key.tupled))
+  def key[A: P] = P(setField(keyValue).map(Key.tupled))
 
-  def primaryKey[_: P] =
+  def primaryKey[A: P] =
     P(
       keyword("where") ~/ spaces ~ key
         ~ (spaces ~ keyword("and") ~/ spaces ~ key).?
@@ -78,12 +78,12 @@ object Parser {
         PrimaryKey(hash, sortKey)
     }
 
-  def direction[_: P]: P[Direction] = P(
+  def direction[A: P]: P[Direction] = P(
     P(keyword("asc")).map(_ => Ascending) |
       P(keyword("desc")).map(_ => Descending)
   )
 
-  def orderBy[_: P] =
+  def orderBy[A: P] =
     P(
       (keyword("order") ~/ spaces ~ keyword("by") ~ spaces ~ ident) ~ opt(
         direction
@@ -93,13 +93,13 @@ object Parser {
         OrderBy(field, direction)
     }
 
-  def from[_: P] = P(keyword("from") ~ spaces ~ ident)
+  def from[A: P] = P(keyword("from") ~ spaces ~ ident)
 
-  def field[_: P] = P(ident).map(FieldSelector.Field)
+  def field[A: P] = P(ident).map(FieldSelector.Field)
 
-  def aggregateFunction[_: P] = StringInIgnoreCase("count").!.map(_.toLowerCase)
+  def aggregateFunction[A: P] = StringInIgnoreCase("count").!.map(_.toLowerCase)
 
-  def aggregate[_: P]: P[Aggregate] =
+  def aggregate[A: P]: P[Aggregate] =
     P(
       aggregateFunction ~ spaces.? ~ "(" ~/ spaces.? ~ allFields ~ spaces.? ~ ")"
     ).flatMap {
@@ -109,25 +109,25 @@ object Parser {
         Fail.opaque("aggregate function")
     }
 
-  def allFields[_: P] = P("*".!.map(_ => FieldSelector.All))
+  def allFields[A: P] = P("*".!.map(_ => FieldSelector.All))
 
-  def fieldSelector[_: P]: P[FieldSelector] = P(
+  def fieldSelector[A: P]: P[FieldSelector] = P(
     allFields | field
   )
 
-  def projection[_: P]: P[Projection] = P(
+  def projection[A: P]: P[Projection] = P(
     // TODO: support select sum(field), a, etc.
     aggregate | fieldSelector
   )
 
-  def projections[_: P]: P[Seq[Projection]] = P(
+  def projections[A: P]: P[Seq[Projection]] = P(
     commaSeparated(projection)
   )
 
-  def useIndex[_: P] =
+  def useIndex[A: P] =
     keyword("use") ~ spaces ~ keyword("index") ~ spaces ~ ident
 
-  def select[_: P] =
+  def select[A: P] =
     P(
       keyword("select") ~/ spaces ~
         projections ~ spaces ~
@@ -138,20 +138,20 @@ object Parser {
         opt(useIndex)
     ).map(Select.tupled)
 
-  def update[_: P] =
+  def update[A: P] =
     P(
       keyword("update") ~/ spaces ~ ident ~ spaces ~
         keyword("set") ~ spaces ~ commaSeparated(setField(value)) ~ spaces ~
         primaryKey
     ).map(Update.tupled)
 
-  def delete[_: P] =
+  def delete[A: P] =
     P(keyword("delete") ~/ spaces ~ from ~ spaces ~ primaryKey)
       .map(Delete.tupled)
 
-  def table[_: P] = P(ident)
+  def table[A: P] = P(ident)
 
-  def insert[_: P] =
+  def insert[A: P] =
     P(
       keyword("insert") ~/ spaces ~
         keyword("into") ~ spaces ~ table ~ space.rep ~
@@ -166,25 +166,25 @@ object Parser {
         Insert(table, pairs)
     }
 
-  def describeTable[_: P] =
+  def describeTable[A: P] =
     P(keyword("describe") ~ spaces ~ keyword("table") ~ spaces ~ ident)
       .map(DescribeTable)
 
-  def showTables[_: P] =
+  def showTables[A: P] =
     P(keyword("show") ~ spaces ~ keyword("tables")).map(_ => ShowTables)
 
-  def format[_: P]: P[Ast.Format] = P(
+  def format[A: P]: P[Ast.Format] = P(
     keyword("tabular").map(_ => Ast.Format.Tabular) |
       keyword("json").map(_ => Ast.Format.Json)
   )
 
-  def setFormat[_: P] = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
+  def setFormat[A: P] = P(keyword("format") ~/ spaces ~ format).map(SetFormat)
 
-  def showFormat[_: P] =
+  def showFormat[A: P] =
     P(keyword("show") ~ spaces ~ keyword("format"))
       .map(_ => ShowFormat)
 
-  def createTable[_: P] =
+  def createTable[A: P] =
     P(
       keyword("create") ~/ spaces ~ keyword("table") ~
         (spaces ~ keyword("if") ~/ spaces ~ keyword("not") ~ spaces ~ keyword(
@@ -201,7 +201,7 @@ object Parser {
         )
     }
 
-  def query[_: P]: P[Command] =
+  def query[A: P]: P[Command] =
     P(
       spaces.? ~ (
         update | select | delete | insert | createTable | showTables | describeTable | setFormat | showFormat

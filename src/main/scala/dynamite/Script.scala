@@ -22,7 +22,7 @@ object Script {
     // paginate through the results, exiting at the first failure and printing as each page is processed
     data
       .mapM(item => f(item.result, false))
-      .mapM(putStrLn(_))
+      .mapM(putStrLn(_).orDie)
       .runDrain
 
   def renderPage(
