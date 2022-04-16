@@ -67,7 +67,13 @@ dql> show tables;
 dql> describe table playlists;
 ```
 
+## DynamoDB Local
 
+By default, Dynamite connects to the DynamoDB instance found via the AWS SDK. To connect to a one-off instance of DynamoDB Local, pass the `--load` flag:
+
+```bash
+dynamite --local
+```
 
 ## Scripting
 
