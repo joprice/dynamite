@@ -6,7 +6,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.13.4"
+scalaVersion := "2.13.8"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
@@ -69,12 +69,12 @@ resolvers ++= Seq(
 // for DynamoDBLocal
 classpathTypes ++= Set("dylib", "so")
 
-val zioVersion = "1.0.4-2"
-val zioConfigVersion = "1.0.0"
-val awsVersion = "1.11.957"
+val zioVersion = "1.0.14"
+val zioConfigVersion = "1.0.10"
+val awsVersion = "1.12.201"
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "fastparse" % "2.3.1",
+  "com.lihaoyi" %% "fastparse" % "2.3.3",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % awsVersion,
   "com.amazonaws" % "aws-java-sdk-sts" % awsVersion,
   "jline" % "jline" % "2.14.6",
@@ -129,8 +129,7 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ywarn-unused:patvars,-implicits",
   "-Ywarn-value-discard",
   "-Ybackend-parallelism", math.min(java.lang.Runtime.getRuntime.availableProcessors, 16).toString,
-  "-Ycache-plugin-class-loader:always",
-  "-P:splain:keepmodules:1"
+  "-Ycache-plugin-class-loader:always"
 )
 
 scalacOptions in (Test, compile) ++= (scalacOptions in (Compile, compile)).value
@@ -173,7 +172,7 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
-addCompilerPlugin("io.tryp" % "splain" % "0.5.8" cross CrossVersion.patch)
+addCompilerPlugin("io.tryp" % "splain" % "1.0.0" cross CrossVersion.patch)
 
 // allows using unsafeRun for experimenting in console
 consoleQuick / initialCommands := """

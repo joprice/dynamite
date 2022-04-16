@@ -59,7 +59,7 @@ object Completer {
     }
   }
 
-  def tableParser[_: P] =
+  def tableParser[A: P] =
     ((keyword("select") ~/ spaces ~ projections ~ spaces) ~ from).map {
       case (_, table) => table
     }
