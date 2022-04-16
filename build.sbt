@@ -10,6 +10,8 @@ scalaVersion := "2.13.8"
 
 mainClass in Compile := Some("dynamite.Dynamite")
 
+maintainer := "pricejosephd@gmail.com"
+
 fork := true
 
 addCommandAlias(
