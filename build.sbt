@@ -1,6 +1,4 @@
 import sbtrelease.ReleaseStateTransformations._
-import ohnosequences.sbt.GithubRelease
-import org.kohsuke.github.GHRelease
 
 enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
@@ -8,7 +6,7 @@ buildInfoPackage := "dynamite"
 
 scalaVersion := "2.13.8"
 
-mainClass in Compile := Some("dynamite.Dynamite")
+Compile / mainClass := Some("dynamite.Dynamite")
 
 maintainer := "pricejosephd@gmail.com"
 
@@ -31,7 +29,7 @@ val dynamodbLocalProperties = Seq(
   "-Dsqlite4java.library.path=native-libs"
 )
 
-javaOptions in Test ++= dynamodbLocalProperties
+Test / javaOptions ++= dynamodbLocalProperties
 
 lazy val copyJars = taskKey[Unit]("copyJars")
 
@@ -58,11 +56,11 @@ copyJars := {
 
 bashScriptExtraDefines += """addJava "-Dsqlite4java.library.path=$(realpath ${app_home}/../native-libs)""""
 
-mappings in Universal ++= NativePackagerHelper.directory("native-libs").map { t =>
+Universal / mappings ++= NativePackagerHelper.directory("native-libs").map { t =>
   (t._1, t._2)
 }
 
-(compile in Compile) := (compile in Compile).dependsOn(copyJars).value
+(Compile / compile) := (Compile / compile).dependsOn(copyJars).value
 
 resolvers ++= Seq(
   "dynamodb-local-oregon" at "https://s3-us-west-2.amazonaws.com/dynamodb-local/release"
@@ -107,14 +105,7 @@ libraryDependencies ++= Seq(
 
 testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
-ghreleaseRepoOrg := "joprice"
-ghreleaseRepoName := "dynamite"
-
-//GithubRelease.draft := true
-
-ghreleaseAssets := Seq((packageBin in Universal).value)
-
-scalacOptions in (Compile, compile) ++= Seq(
+(Compile / compile / scalacOptions) ++= Seq(
   "-encoding",
   "UTF-8",
   "-deprecation",
@@ -134,7 +125,7 @@ scalacOptions in (Compile, compile) ++= Seq(
   "-Ycache-plugin-class-loader:always"
 )
 
-scalacOptions in (Test, compile) ++= (scalacOptions in (Compile, compile)).value
+(Test / compile / scalacOptions) ++= (Compile / compile / scalacOptions).value
 
 lazy val checkVersionNotes = taskKey[Unit](
   "Checks that the notes for the next version are present to avoid build failures."
@@ -150,12 +141,6 @@ checkVersionNotes := {
   }
 }
 
-lazy val releaseOnGithub = taskKey[GHRelease]("Releases project on github")
-
-releaseOnGithub := Def.taskDyn {
-  GithubRelease.defs.githubRelease(s"v${version.value}")
-}.value
-
 releaseProcess := Seq[ReleaseStep](
   releaseStepTask(checkVersionNotes),
   checkSnapshotDependencies,
@@ -167,7 +152,8 @@ releaseProcess := Seq[ReleaseStep](
   tagRelease,
   // the new tag needs to be present on github before releasing
   pushChanges,
-  releaseStepTask(releaseOnGithub),
+  //TODO: replace with github actions
+  //releaseStepTask(releaseOnGithub),
   setNextVersion,
   commitNextVersion,
   pushChanges
@@ -189,6 +175,6 @@ reporterConfig := reporterConfig.value.withShowLegend(false)
 reporterConfig := reporterConfig.value.withReverseOrder(true)
 
 // disable docs since this is not a library
-publishArtifact in (Compile, packageDoc) := false
-publishArtifact in packageDoc := false
-sources in (Compile,doc) := Seq.empty
+compile / packageDoc / publishArtifact := false
+packageDoc / publishArtifact := false
+Compile /doc / sources := Seq.empty
