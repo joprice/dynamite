@@ -4,7 +4,7 @@ enablePlugins(JavaAppPackaging, BuildInfoPlugin)
 
 buildInfoPackage := "dynamite"
 
-scalaVersion := "2.13.8"
+scalaVersion := "2.13.11"
 
 Compile / mainClass := Some("dynamite.Dynamite")
 
@@ -78,8 +78,8 @@ libraryDependencies ++= Seq(
   "com.amazonaws" % "aws-java-sdk-dynamodb" % awsVersion,
   "com.amazonaws" % "aws-java-sdk-sts" % awsVersion,
   "jline" % "jline" % "2.14.6",
-  "com.lihaoyi" %% "fansi" % "0.2.10",
-  "com.github.scopt" %% "scopt" % "4.0.0",
+  "com.lihaoyi" %% "fansi" % "0.4.0",
+  "com.github.scopt" %% "scopt" % "4.1.0",
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
   "dev.zio" %% "zio-config" % zioConfigVersion,
   "dev.zio" %% "zio-config-typesafe" % zioConfigVersion,
@@ -88,7 +88,7 @@ libraryDependencies ++= Seq(
   "dev.zio" %% "zio-streams" % zioVersion,
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
-  "com.typesafe.play" %% "play-json" % "2.9.2",
+  "com.typesafe.play" %% "play-json" % "2.9.4",
   "com.amazonaws" % "DynamoDBLocal" % "1.11.477",
   "com.almworks.sqlite4java" % "sqlite4java" % dynamodbLocalVersion,
   "com.almworks.sqlite4java" % "libsqlite4java-osx" % dynamodbLocalVersion artifacts (Artifact(
@@ -160,7 +160,7 @@ releaseProcess := Seq[ReleaseStep](
 )
 
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
-addCompilerPlugin("io.tryp" % "splain" % "1.0.0" cross CrossVersion.patch)
+addCompilerPlugin("io.tryp" % "splain" % "1.0.2" cross CrossVersion.patch)
 
 // allows using unsafeRun for experimenting in console
 consoleQuick / initialCommands := """
